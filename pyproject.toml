@@ -1,0 +1,28 @@
+[project]
+name = "air-quality-etl"
+version = "0.1.0"
+description = "Automated air quality & weather ETL for Hanoi, Da Nang and Ho Chi Minh City"
+requires-python = ">=3.12"
+dependencies = [
+    "duckdb>=1.1",
+    "httpx>=0.27",
+    "matplotlib>=3.9",
+    "polars>=1.12",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.3", "ruff>=0.7"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

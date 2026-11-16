@@ -1,0 +1,60 @@
+name: ETL
+
+on:
+  schedule:
+    # 01:00 and 13:00 UTC = 08:00 and 20:00 Asia/Ho_Chi_Minh.
+    - cron: "0 1,13 * * *"
+  workflow_dispatch:
+
+concurrency:
+  # Never let a slow run overlap the next one and interleave parquet writes.
+  group: etl
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  etl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Lint
+        run: uv run ruff check src tests
+
+      # Tests gate the data. A red QA/QC rule must never be able to commit
+      # plausible-looking bad numbers to a repo whose whole point is trust.
+      - name: Test
+        run: uv run pytest -q
+
+      - name: Run pipeline
+        env:
+          OPENAQ_API_KEY: ${{ secrets.OPENAQ_API_KEY }}
+        run: |
+          # A rolling window rather than "since last run": the runner is
+          # stateless, and 90 days re-fetch is cheap enough on the free tier.
+          uv run python -m aqetl run --since "$(date -u -d '90 days ago' +%F)"
+
+      - name: Commit updated data and chart
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # data/ may not exist if no station reported; charts/ always does.
+          [ -d data ] && git add data || true
+          [ -d charts ] && git add charts || true
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git commit -m "chore(data): refresh $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push
