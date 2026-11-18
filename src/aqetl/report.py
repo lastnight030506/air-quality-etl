@@ -24,25 +24,37 @@ SELECT CAST(hour_utc AS DATE) AS date,
        city,
        parameter,
        avg(value_clean) AS mean_ugm3,
-       count(value_clean) AS n_hours
+       -- Distinct hours, not rows: several stations per city would otherwise
+       -- report 58 "hours" in a 24-hour day and pass any coverage test.
+       count(DISTINCT hour_utc) FILTER (WHERE value_clean IS NOT NULL) AS n_hours
 FROM curated
 WHERE hour_utc >= ? AND hour_utc < ?
 GROUP BY 1, 2, 3
 ORDER BY date, city, parameter
 """
 
+# Anomaly rate is split into two numbers on purpose. A station that is offline
+# has no readings to be suspicious of; calling that a 100% anomaly rate makes
+# the whole metric useless, because coverage and data quality are different
+# failures with different fixes. `anomaly_pct` is therefore bad readings as a
+# share of hours actually RECEIVED, and `missing_pct` carries coverage.
 _STATION_QC_SQL = """
 SELECT city,
        station_id,
-       min(station_name) AS station_name,
+       coalesce(nullif(trim(min(station_name)), ''), 'station ' || cast(station_id AS VARCHAR))
+           AS station_name,
        parameter,
        count(*) AS n_expected,
+       count(*) FILTER (WHERE coalesce(qc_missing, false)) AS qc_missing,
+       count(*) FILTER (WHERE NOT coalesce(qc_missing, false)) AS n_received,
        count(*) FILTER (WHERE coalesce(qc_negative, false)) AS qc_negative,
        count(*) FILTER (WHERE coalesce(qc_impossible, false)) AS qc_impossible,
        count(*) FILTER (WHERE coalesce(qc_stuck, false)) AS qc_stuck,
        count(*) FILTER (WHERE coalesce(qc_spike, false)) AS qc_spike,
-       count(*) FILTER (WHERE coalesce(qc_missing, false)) AS qc_missing,
-       100.0 * count(*) FILTER (WHERE coalesce(qc_flags, 0) > 0) / count(*) AS anomaly_pct
+       100.0 * count(*) FILTER (WHERE coalesce(qc_missing, false)) / count(*) AS missing_pct,
+       100.0 * count(*) FILTER (
+           WHERE NOT coalesce(qc_missing, false) AND coalesce(qc_flags, 0) > 0
+       ) / nullif(count(*) FILTER (WHERE NOT coalesce(qc_missing, false)), 0) AS anomaly_pct
 FROM curated
 WHERE hour_utc >= ? AND hour_utc < ?
 GROUP BY city, station_id, parameter
@@ -113,11 +125,13 @@ STATION_QC_SCHEMA = {
     "station_name": pl.String,
     "parameter": pl.String,
     "n_expected": pl.Int64,
+    "qc_missing": pl.Int64,
+    "n_received": pl.Int64,
     "qc_negative": pl.Int64,
     "qc_impossible": pl.Int64,
     "qc_stuck": pl.Int64,
     "qc_spike": pl.Int64,
-    "qc_missing": pl.Int64,
+    "missing_pct": pl.Float64,
     "anomaly_pct": pl.Float64,
 }
 

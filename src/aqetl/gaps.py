@@ -47,7 +47,16 @@ def fill_gaps(df: pl.DataFrame, start: datetime, end: datetime) -> pl.DataFrame:
     for (city, station_id, parameter), group in ordered.group_by(
         _GROUP, maintain_order=True
     ):
-        spine = align.hourly_spine(start, last_hour, city, station_id, parameter)
+        # A station's expected hours start at its own first reading inside the
+        # window: charging it for the months before it appeared buries the real
+        # gaps in a 95% figure. The END stays at the window edge on purpose —
+        # a station that goes dark mid-window is an outage worth flagging.
+        received = group.filter(pl.col("value_raw").is_not_null())
+        if received.is_empty():
+            continue
+        spine_start = max(start, received["hour_utc"].min())
+        spine_end = end - timedelta(hours=1)
+        spine = align.hourly_spine(spine_start, spine_end, city, station_id, parameter)
         # The curated key has no sensor_id, so two sensors on one parameter would
         # collide: prefer a real reading over a null, then the lowest sensor id.
         observed = (

@@ -26,6 +26,7 @@ CITY_COLOURS = {"hanoi": "#0072B2", "danang": "#D55E00", "hcmc": "#009E73"}
 BENCH_COLOUR = "#B2182B"
 WHO_COLOUR = "#5A5A5A"
 BAR_COLOUR = "#52527A"
+MISSING_COLOUR = "#C2C2CE"
 
 DISPLAY = {city.key: city.name for city in CITIES}
 MIN_HOURS = 18
@@ -36,16 +37,27 @@ def _top(ax: plt.Axes, daily: pl.DataFrame, today: date) -> None:
         daily.filter((pl.col("parameter") == "pm25") & (pl.col("n_hours") >= MIN_HOURS))
         .sort("date")
     )
-    for key in [c.key for c in CITIES]:
+    plotted = [
+        key for key in (c.key for c in CITIES)
+        if not pm.filter(pl.col("city") == key).is_empty()
+    ]
+    for key in plotted:
         frame = pm.filter(pl.col("city") == key)
-        if frame.is_empty():
-            continue
         ax.plot(
             frame["date"].to_list(),
             frame["mean_ugm3"].to_list(),
             color=CITY_COLOURS[key],
             linewidth=1.8,
             label=DISPLAY[key],
+        )
+    # Cities with no reporting station must be stated, not silently missing:
+    # Da Nang has no OpenAQ location within 25 km at all.
+    absent = [DISPLAY[key] for key in (c.key for c in CITIES) if key not in plotted]
+    if absent:
+        ax.annotate(
+            "No station reported 24 h data: " + ", ".join(absent),
+            xy=(0.0, -0.16), xycoords="axes fraction",
+            fontsize=7.5, color="#8A5A00", ha="left",
         )
     ax.axhline(
         standards.qcvn_24h("pm25", today),
@@ -78,24 +90,54 @@ def _top(ax: plt.Axes, daily: pl.DataFrame, today: date) -> None:
 
 
 def _bottom(ax: plt.Axes, qc: pl.DataFrame) -> None:
+    """Two bars per station: received-but-dubious, and not received at all.
+
+    They are drawn side by side because collapsing them hid the point: a station
+    that was offline is not a station that was lying.
+    """
     top = (
-        qc.sort("anomaly_pct", descending=True)
-        .head(15)
+        qc.filter(pl.col("n_received") > 0)
+        .sort("n_received", descending=True)
+        .head(12)
         .with_columns(
             (
-                pl.col("station_name").fill_null("unknown").str.slice(0, 28)
+                pl.col("station_name").fill_null("unknown").str.slice(0, 26)
                 + " · "
                 + pl.col("parameter")
-            ).alias("label")
+            ).alias("label"),
+            # A station with zero received hours has no quality to rate; it is
+            # plotted by missing_pct alone, and matplotlib cannot take a null.
+            pl.col("anomaly_pct").fill_null(0.0),
+            pl.col("missing_pct").fill_null(100.0),
         )
         .reverse()
     )
-    ax.barh(top["label"].to_list(), top["anomaly_pct"].to_list(), color=BAR_COLOUR)
-    ax.set_title(
-        "Anomaly rate by station, last 30 days", loc="left", fontsize=12, fontweight="bold"
+    labels = top["label"].to_list()
+    y = range(len(labels))
+    ax.barh(
+        [v + 0.2 for v in y], top["anomaly_pct"].to_list(), height=0.4,
+        color=BAR_COLOUR, label="Flagged reading (% of received hours)",
     )
-    ax.set_xlabel("Anomalous hours (% of expected)")
+    ax.barh(
+        [v - 0.2 for v in y], top["missing_pct"].to_list(), height=0.4,
+        color=MISSING_COLOUR, label="No data (% of expected hours)",
+    )
+    ax.set_yticks(list(y))
+    ax.set_yticklabels(labels)
+    ax.set_title(
+        "Data quality by station, last 30 days", loc="left", fontsize=12, fontweight="bold",
+        pad=18,
+    )
+    ax.set_xlabel("Percent")
+    ax.set_xlim(0, 105)
     ax.tick_params(axis="y", labelsize=7)
+    # Above the axes: at lower-right the labels sat on top of the longest bars.
+    ax.legend(
+        frameon=False, fontsize=7, ncol=2, loc="lower left",
+        bbox_to_anchor=(0, 1.0, 1, 0.1), borderaxespad=0,
+    )
+    ax.grid(axis="x", color="#DDDDDD", linewidth=0.7)
+    ax.set_axisbelow(True)
     for side in ("top", "right"):
         ax.spines[side].set_visible(False)
 
