@@ -126,7 +126,7 @@ OpenAQ's free tier of 2000 requests/hour.
 ## Testing
 
 ```bash
-uv run pytest -q       # 53 tests
+uv run pytest -q       # 54 tests
 ```
 
 The unit tests pin the boundaries that are easy to get quietly wrong: stuck
