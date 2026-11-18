@@ -187,6 +187,10 @@ def _curated_row(
     }
 
 
+def _last_seen(location: dict) -> str:
+    return (location.get("datetimeLast") or {}).get("utc") or ""
+
+
 def fetch_city(
     client: httpx.Client,
     city: City,
@@ -202,18 +206,26 @@ def fetch_city(
         if not location.get("isMobile")
     ]
     stations = [pair for pair in stations if pair[1]]
-    stations.sort(key=lambda pair: pair[0].get("id") or 0)
+    # Newest first, and only stations that reported inside the window. OpenAQ
+    # keeps retired stations in its catalogue: sorting by id picked five that
+    # had been offline for years and produced a silent zero-row run while a
+    # station reporting this hour sat further down the list.
+    since = start.strftime("%Y-%m-%dT%H:%M:%SZ")
+    stations.sort(key=lambda pair: _last_seen(pair[0]), reverse=True)
+    live = [pair for pair in stations if _last_seen(pair[0]) >= since]
     # Per-city visibility: a silent zero here is the difference between "the
     # city has no stations" and "our query is wrong", and the run log is the
     # only place that distinction can be recovered later.
     print(
         f"  {city.key:8} locations={len(all_locations)}"
-        f" with_target_sensors={len(stations)} taking={min(len(stations), max_stations)}",
+        f" with_target_sensors={len(stations)} live_in_window={len(live)}"
+        f" newest={_last_seen(stations[0][0]) if stations else 'none'}"
+        f" taking={min(len(live), max_stations)}",
         flush=True,
     )
 
     rows = []
-    for location, sensors in stations[:max_stations]:
+    for location, sensors in live[:max_stations]:
         for sensor_id, parameter in sensors:
             readings = fetch_hours(client, sensor_id, start, end)
             for reading in readings:

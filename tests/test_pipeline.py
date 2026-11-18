@@ -24,6 +24,9 @@ LOCATION = {
     "name": "Test Station",
     "timezone": "Asia/Ho_Chi_Minh",
     "isMobile": False,
+    # Station selection is recency-based, so a fixture without this would be
+    # dropped as retired before any sensor is queried.
+    "datetimeLast": {"utc": "2026-11-02T00:00:00Z"},
     "sensors": [
         {"id": 900, "parameter": {"id": 2, "name": "pm25", "units": "µg/m³"}},
         {"id": 901, "parameter": {"id": 7, "name": "no2", "units": "ppm"}},

@@ -109,3 +109,65 @@ def test_mobile_locations_are_skipped_and_rows_are_typed(monkeypatch):
     frame = openaq.fetch_all(start, start, cities=(CITIES[0],))
     assert frame.is_empty()
     assert dict(frame.schema) == openaq.EXTRACT_SCHEMA
+
+
+def test_retired_stations_are_not_selected_over_live_ones(monkeypatch):
+    """OpenAQ keeps retired stations; picking by id used to select decade-dead ones.
+
+    This is the regression behind a run that reported 'extract 0 rows' while a
+    station in the same city was reporting that hour.
+    """
+    from datetime import datetime
+
+    monkeypatch.setenv("OPENAQ_API_KEY", "test-key")
+    dead = {
+        "id": 18,
+        "name": "Dead",
+        "isMobile": False,
+        "datetimeLast": {"utc": "2016-11-09T16:00:00Z"},
+        "sensors": [{"id": 37, "parameter": {"id": 2, "units": "µg/m³"}}],
+    }
+    live = {
+        "id": 4946812,
+        "name": "Live",
+        "isMobile": False,
+        "datetimeLast": {"utc": "2026-11-18T07:05:00Z"},
+        "sensors": [{"id": 900, "parameter": {"id": 2, "units": "µg/m³"}}],
+    }
+    queried: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/locations"):
+            return httpx.Response(200, json={"meta": {"found": 2}, "results": [dead, live]})
+        sensor = int(path.split("/sensors/")[1].split("/")[0])
+        queried.append(sensor)
+        end = "2026-11-18T08:00:00Z"
+        return httpx.Response(
+            200,
+            json={
+                "meta": {"limit": 1000},
+                "results": [{
+                    "value": 42.0,
+                    "parameter": {"units": "µg/m³"},
+                    "period": {"datetimeFrom": {"utc": "2026-11-18T07:00:00Z"},
+                               "datetimeTo": {"utc": end}},
+                    "coverage": {"percentComplete": 100.0},
+                }],
+            },
+        )
+
+    real = httpx.Client
+
+    def patched(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(openaq.httpx, "Client", patched)
+
+    start = datetime(2026, 11, 18, 0, tzinfo=UTC)
+    frame = openaq.fetch_all(start, datetime(2026, 11, 18, 9, tzinfo=UTC),
+                             cities=(CITIES[0],))
+    assert queried == [900], f"queried retired sensors: {queried}"
+    assert len(frame) == 1
+    assert frame["station_name"].to_list() == ["Live"]
