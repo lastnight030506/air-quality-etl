@@ -11,6 +11,7 @@ align.openmeteo_local_to_utc.
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
+from time import sleep
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -26,7 +27,30 @@ HOURLY = (
 )
 TIMEZONE = "Asia/Ho_Chi_Minh"
 PAST_DAYS = 2
+_ATTEMPTS = 3
+_BACKOFF_S = 1.0
 TIMEOUT_S = 30.0
+
+
+def _get_with_retry(client: httpx.Client, url: str, params: dict) -> httpx.Response:
+    """Retry the TLS handshake, which is what actually fails on CI runners.
+
+    Observed twice in GitHub Actions: ConnectTimeout on the handshake, while the
+    same host answers in ~1 s locally. Weather is enrichment, but silently
+    shipping nulls whenever a runner is unlucky is worse than a short retry.
+    """
+    last: Exception | None = None
+    for attempt in range(_ATTEMPTS):
+        try:
+            response = client.get(url, params=params)
+            response.raise_for_status()
+            return response
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout) as exc:
+            last = exc
+            if attempt < _ATTEMPTS - 1:
+                sleep(_BACKOFF_S * (attempt + 1))
+    assert last is not None
+    raise last
 
 
 def _fetch(
@@ -49,9 +73,8 @@ def _fetch(
         params["start_date"] = start.isoformat()
         params["end_date"] = end.isoformat()
     else:
-        params["past_days"] = PAST_DAYS
-    response = client.get(ARCHIVE_URL if archive else FORECAST_URL, params=params)
-    response.raise_for_status()
+        params["past_days"] = max(PAST_DAYS, min(92, (date.today() - start).days + 2))
+    response = _get_with_retry(client, ARCHIVE_URL if archive else FORECAST_URL, params)
     hourly = response.json().get("hourly") or {}
     stamps = [align.openmeteo_local_to_utc(s) for s in hourly.get("time") or []]
     n = len(stamps)

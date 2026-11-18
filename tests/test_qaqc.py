@@ -95,3 +95,21 @@ def test_empty_frame_survives():
 def test_null_values_do_not_crash_rules(parameter):
     out = qaqc.apply_all(frame([10.0, None, 12.0], parameter=parameter))
     assert len(out) == 3
+
+
+def test_stuck_never_fires_on_gap_filled_nulls():
+    """A stretch of absent hours is not a frozen sensor.
+
+    Regression: nulls compare equal, so run-length grouping marked every
+    gap-filled hour as stuck and inflated the anomaly rate to ~50%.
+    """
+    out = qaqc.apply_all(frame([10.0, 11.0] + [None] * 10 + [12.0, 13.0]))
+    assert out["qc_missing"].sum() == 10
+    assert out["qc_stuck"].sum() == 0
+
+
+def test_stuck_still_fires_on_a_real_run_next_to_nulls():
+    out = qaqc.apply_all(frame([None] * 8 + [40.0] * 6 + [None] * 8))
+    stuck = out.filter(pl.col("qc_stuck"))
+    assert stuck.height == 6
+    assert stuck["value_ugm3"].to_list() == [40.0] * 6

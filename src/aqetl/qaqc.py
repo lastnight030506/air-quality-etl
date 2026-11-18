@@ -60,6 +60,11 @@ def flag_stuck(df: pl.DataFrame, col: str = "value_ugm3") -> pl.DataFrame:
 
     Runs are computed per sensor over `hour_utc` order, on the raw value rounded
     to 2 dp: sensor noise at the 3rd decimal is not a stuck sensor.
+
+    Nulls are excluded explicitly. SQL null comparison is not equality, but a
+    run-length grouping treats every null as the same value, so a stretch of
+    gap-filled hours otherwise reads as a frozen sensor and inflates the anomaly
+    rate by an order of magnitude.
     """
     ordered = df.sort([*_SENSOR, "hour_utc"])
     runs = (
@@ -70,7 +75,11 @@ def flag_stuck(df: pl.DataFrame, col: str = "value_ugm3") -> pl.DataFrame:
         )
         .with_columns(pl.len().over([*_SENSOR, "_run"]).alias("_run_len"))
         .with_columns(
-            (pl.col("_run_len") >= STUCK_RUN).fill_null(False).alias("qc_stuck")
+            (
+                (pl.col("_run_len") >= STUCK_RUN) & pl.col("_v").is_not_null()
+            )
+            .fill_null(False)
+            .alias("qc_stuck")
         )
         .drop("_v", "_run", "_run_len")
     )
