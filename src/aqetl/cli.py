@@ -114,17 +114,34 @@ def _report() -> int:
 
 
 def _probe(args: argparse.Namespace) -> int:
-    """Print what the API actually returns.
+    """Print what the APIs actually return.
 
     Written because a zero-row run is otherwise indistinguishable from a healthy
     one, and the response shape cannot be observed without the key.
     """
     import json
     from datetime import timedelta
+    from time import perf_counter
 
     import httpx
 
     from .openaq import _request, fetch_locations
+    from .openmeteo import ARCHIVE_URL, FORECAST_URL
+
+    print("== network ==")
+    for label, url in (("archive", ARCHIVE_URL), ("forecast", FORECAST_URL)):
+        started = perf_counter()
+        try:
+            response = httpx.get(
+                url,
+                params={"latitude": 21.0285, "longitude": 105.8542,
+                        "hourly": "temperature_2m", "past_days": 1},
+                timeout=20.0,
+            )
+            print(f"  {label:9} {response.status_code} in {perf_counter() - started:.2f}s")
+        except Exception as exc:  # noqa: BLE001 - diagnostic
+            print(f"  {label:9} FAILED in {perf_counter() - started:.2f}s "
+                  f"{type(exc).__name__}: {exc}")
 
     end = datetime.now(tz=UTC)
     with httpx.Client(timeout=30.0) as client:
