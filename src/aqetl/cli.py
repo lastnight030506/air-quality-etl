@@ -145,15 +145,16 @@ def _probe(args: argparse.Namespace) -> int:
 
     # The bare-request test above passes in CI while the pipeline fails, so the
     # gap is somewhere in fetch_city. Exercise it exactly as the pipeline does.
-    print("== openmeteo.fetch_city, as the pipeline calls it ==")
-    from .openmeteo import fetch_city as fetch_meteo
+    print("== openmeteo.fetch_all, as the pipeline calls it ==")
+    from .openmeteo import fetch_all as fetch_meteo_all
 
     started = perf_counter()
     try:
         with httpx.Client(timeout=30.0) as client:
-            frame = fetch_meteo(client, CITIES[0], args.meteo_start, args.meteo_end)
+            frame = fetch_meteo_all(args.meteo_start, args.meteo_end)
         print(f"  ok rows={frame.height} in {perf_counter() - started:.2f}s "
-              f"nulls={frame['temperature_2m'].null_count()}")
+              f"nulls={frame['temperature_2m'].null_count()} "
+              f"cities={sorted(frame['city'].unique().to_list())}")
     except Exception as exc:  # noqa: BLE001 - diagnostic
         print(f"  FAILED in {perf_counter() - started:.2f}s "
               f"{type(exc).__name__}: {exc}")
