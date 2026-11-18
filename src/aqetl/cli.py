@@ -143,6 +143,21 @@ def _probe(args: argparse.Namespace) -> int:
             print(f"  {label:9} FAILED in {perf_counter() - started:.2f}s "
                   f"{type(exc).__name__}: {exc}")
 
+    # The bare-request test above passes in CI while the pipeline fails, so the
+    # gap is somewhere in fetch_city. Exercise it exactly as the pipeline does.
+    print("== openmeteo.fetch_city, as the pipeline calls it ==")
+    from .openmeteo import fetch_city as fetch_meteo
+
+    started = perf_counter()
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            frame = fetch_meteo(client, CITIES[0], args.meteo_start, args.meteo_end)
+        print(f"  ok rows={frame.height} in {perf_counter() - started:.2f}s "
+              f"nulls={frame['temperature_2m'].null_count()}")
+    except Exception as exc:  # noqa: BLE001 - diagnostic
+        print(f"  FAILED in {perf_counter() - started:.2f}s "
+              f"{type(exc).__name__}: {exc}")
+
     end = datetime.now(tz=UTC)
     with httpx.Client(timeout=30.0) as client:
         for city in args.cities:
@@ -226,6 +241,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     probe = sub.add_parser("probe", help="print the raw OpenAQ station coverage per city")
     probe.add_argument("--cities", type=_cities, default=CITIES)
+    probe.add_argument("--meteo-start", type=_parse_date,
+                       default=date.today() - timedelta(days=90))
+    probe.add_argument("--meteo-end", type=_parse_date, default=date.today())
     return parser
 
 
