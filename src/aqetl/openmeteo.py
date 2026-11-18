@@ -47,6 +47,11 @@ def _get_with_retry(client: httpx.Client, url: str, params: dict) -> httpx.Respo
             return response
         except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout) as exc:
             last = exc
+            print(
+                f"    weather attempt {attempt + 1}/{_ATTEMPTS} failed: "
+                f"{type(exc).__name__}: {exc}",
+                flush=True,
+            )
             if attempt < _ATTEMPTS - 1:
                 sleep(_BACKOFF_S * (attempt + 1))
     assert last is not None
