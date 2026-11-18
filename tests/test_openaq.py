@@ -7,11 +7,13 @@ reports success with zero rows.
 
 from __future__ import annotations
 
+from datetime import UTC
+
 import httpx
 import pytest
 
 from aqetl import openaq
-from aqetl.config import PARAMETERS, SEARCH_RADIUS_M, CITIES
+from aqetl.config import CITIES, PARAMETERS, SEARCH_RADIUS_M
 
 
 def _capture(monkeypatch) -> list[httpx.URL]:
@@ -101,9 +103,9 @@ def test_mobile_locations_are_skipped_and_rows_are_typed(monkeypatch):
         return real(*args, **kwargs)
 
     monkeypatch.setattr(openaq.httpx, "Client", patched)
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    start = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    start = datetime(2026, 11, 1, tzinfo=UTC)
     frame = openaq.fetch_all(start, start, cities=(CITIES[0],))
     assert frame.is_empty()
     assert dict(frame.schema) == openaq.EXTRACT_SCHEMA
