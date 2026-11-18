@@ -136,6 +136,7 @@ def _probe(args: argparse.Namespace) -> int:
                 continue
             with_target = []
             print(f"\n== {city.key} == locations in range: {len(locations)}")
+            recency: list[tuple[str, str]] = []
             for loc in locations:
                 sensors = [
                     (s.get("id"), (s.get("parameter") or {}).get("id"),
@@ -145,10 +146,20 @@ def _probe(args: argparse.Namespace) -> int:
                 hits = [s for s in sensors if s[1] in PARAMETERS]
                 if hits:
                     with_target.append((loc, hits))
+                    last = (loc.get("datetimeLast") or {}).get("utc") or "never"
+                    recency.append((last, str(loc.get("name"))))
             print(f"  with a target parameter: {len(with_target)}")
+            # The decisive question: does ANY station in this city still report?
+            for last, name in sorted(recency, reverse=True)[:5]:
+                print(f"  newest: {last}  {name[:48]}")
             if not with_target:
                 continue
 
+            # Newest station, not just the first: an old station would make the
+            # window test meaningless.
+            with_target.sort(
+                key=lambda pair: (pair[0].get("datetimeLast") or {}).get("utc") or "", reverse=True
+            )
             loc, hits = with_target[0]
             sensor_id, param_id, units = hits[0]
             print(
