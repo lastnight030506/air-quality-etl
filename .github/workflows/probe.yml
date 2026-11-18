@@ -1,0 +1,24 @@
+name: Probe
+
+# Diagnostic only: prints OpenAQ station coverage per city so a zero-row run can
+# be told apart from a broken query. Safe to delete once coverage is known.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Probe station coverage
+        env:
+          OPENAQ_API_KEY: ${{ secrets.OPENAQ_API_KEY }}
+        run: uv run python -m aqetl probe

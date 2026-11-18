@@ -12,7 +12,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 
 from . import align, chart, qaqc, report, storage, units
-from .config import CITIES, City
+from .config import CITIES, PARAMETERS, City
 from .schema import QC_FLAG_COLUMNS, empty_weather
 
 ROOT = Path("data")
@@ -52,6 +52,16 @@ def _run(args: argparse.Namespace) -> int:
 
     raw = fetch_all(start, end, cities=args.cities)
     _log("extract", f"{len(raw)} rows")
+    if raw.is_empty():
+        # Committing empty reports would look like a healthy run and erase the
+        # evidence that the extract failed. Fail loudly instead.
+        print(
+            "aqetl run: extract returned no rows. Either the API key lacks access, "
+            "no station in range reports the configured parameters, or the query "
+            "shape is wrong. Nothing was written.",
+            file=sys.stderr,
+        )
+        return 1
 
     # Weather is enrichment, not the deliverable: a met-service outage must not
     # discard observations we already paid API calls for.
@@ -103,6 +113,41 @@ def _report() -> int:
     return 0
 
 
+def _probe(args: argparse.Namespace) -> int:
+    """Print what the API actually returns.
+
+    Written because a zero-row run is otherwise indistinguishable from a healthy
+    one, and the response shape cannot be observed without the key.
+    """
+    import httpx
+
+    from .openaq import fetch_locations
+
+    with httpx.Client(timeout=30.0) as client:
+        for city in args.cities:
+            try:
+                locations = fetch_locations(client, city)
+            except Exception as exc:  # noqa: BLE001 - this command is diagnostic
+                print(f"{city.key}: locations call failed: {exc}")
+                continue
+            with_target = 0
+            print(f"\n== {city.key} == locations in range: {len(locations)}")
+            for loc in locations:
+                sensors = [
+                    (s.get("id"), (s.get("parameter") or {}).get("id"))
+                    for s in (loc.get("sensors") or [])
+                ]
+                hits = [s for s in sensors if s[1] in PARAMETERS]
+                if hits:
+                    with_target += 1
+                    print(
+                        f"  id={loc.get('id')} mobile={loc.get('isMobile')} "
+                        f"name={loc.get('name')!r} sensors={hits}"
+                    )
+            print(f"  with a target parameter: {with_target}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="aqetl", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -114,6 +159,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--dry-run", action="store_true")
 
     sub.add_parser("report", help="rebuild reports and chart from stored parquet")
+
+    probe = sub.add_parser("probe", help="print the raw OpenAQ station coverage per city")
+    probe.add_argument("--cities", type=_cities, default=CITIES)
     return parser
 
 
@@ -123,7 +171,11 @@ def main(argv: list[str] | None = None) -> int:
         print("--since is after --until", file=sys.stderr)
         return 1
     try:
-        return _run(args) if args.command == "run" else _report()
+        if args.command == "run":
+            return _run(args)
+        if args.command == "probe":
+            return _probe(args)
+        return _report()
     except Exception as exc:  # the workflow wants a legible one-line failure
         print(f"aqetl {args.command}: {exc}", file=sys.stderr)
         return 1

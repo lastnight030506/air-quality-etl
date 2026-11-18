@@ -101,7 +101,10 @@ def fetch_locations(client: httpx.Client, city: City) -> list[dict]:
     params = {
         "coordinates": f"{city.latitude},{city.longitude}",
         "radius": SEARCH_RADIUS_M,
-        "parameters_id": ",".join(str(pid) for pid in PARAMETERS),
+        # The API types this as array<int>; httpx repeats the key for a list.
+        # A comma-joined string is silently ignored, which returns every
+        # location in range and then filters to nothing downstream.
+        "parameters_id": sorted(PARAMETERS),
         "limit": _LOCATION_PAGE,
     }
     locations: list[dict] = []
@@ -192,18 +195,28 @@ def fetch_city(
     *,
     max_stations: int = 5,
 ) -> pl.DataFrame:
+    all_locations = fetch_locations(client, city)
     stations = [
         (location, _target_sensors(location))
-        for location in fetch_locations(client, city)
+        for location in all_locations
         if not location.get("isMobile")
     ]
     stations = [pair for pair in stations if pair[1]]
     stations.sort(key=lambda pair: pair[0].get("id") or 0)
+    # Per-city visibility: a silent zero here is the difference between "the
+    # city has no stations" and "our query is wrong", and the run log is the
+    # only place that distinction can be recovered later.
+    print(
+        f"  {city.key:8} locations={len(all_locations)}"
+        f" with_target_sensors={len(stations)} taking={min(len(stations), max_stations)}",
+        flush=True,
+    )
 
     rows = []
     for location, sensors in stations[:max_stations]:
         for sensor_id, parameter in sensors:
-            for reading in fetch_hours(client, sensor_id, start, end):
+            readings = fetch_hours(client, sensor_id, start, end)
+            for reading in readings:
                 row = _curated_row(city, location, sensor_id, parameter, reading)
                 if row is not None:
                     rows.append(row)
