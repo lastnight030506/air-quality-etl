@@ -12,7 +12,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 
 from . import align, chart, qaqc, report, storage, units
-from .config import CITIES, PARAMETERS, City
+from .config import CITIES, OPENAQ_BASE, PARAMETERS, City
 from .schema import QC_FLAG_COLUMNS, empty_weather
 
 ROOT = Path("data")
@@ -119,10 +119,15 @@ def _probe(args: argparse.Namespace) -> int:
     Written because a zero-row run is otherwise indistinguishable from a healthy
     one, and the response shape cannot be observed without the key.
     """
+    import json
+    from datetime import timedelta
+
     import httpx
 
-    from .openaq import fetch_locations
+    from .openaq import _request, fetch_locations
 
+    start = datetime.now(tz=UTC) - timedelta(days=2)
+    end = datetime.now(tz=UTC)
     with httpx.Client(timeout=30.0) as client:
         for city in args.cities:
             try:
@@ -130,21 +135,54 @@ def _probe(args: argparse.Namespace) -> int:
             except Exception as exc:  # noqa: BLE001 - this command is diagnostic
                 print(f"{city.key}: locations call failed: {exc}")
                 continue
-            with_target = 0
+            with_target = []
             print(f"\n== {city.key} == locations in range: {len(locations)}")
             for loc in locations:
                 sensors = [
-                    (s.get("id"), (s.get("parameter") or {}).get("id"))
+                    (s.get("id"), (s.get("parameter") or {}).get("id"),
+                     (s.get("parameter") or {}).get("units"))
                     for s in (loc.get("sensors") or [])
                 ]
                 hits = [s for s in sensors if s[1] in PARAMETERS]
                 if hits:
-                    with_target += 1
-                    print(
-                        f"  id={loc.get('id')} mobile={loc.get('isMobile')} "
-                        f"name={loc.get('name')!r} sensors={hits}"
-                    )
-            print(f"  with a target parameter: {with_target}")
+                    with_target.append((loc, hits))
+            print(f"  with a target parameter: {len(with_target)}")
+            if not with_target:
+                continue
+
+            loc, hits = with_target[0]
+            sensor_id, param_id, units = hits[0]
+            print(
+                f"  sample station id={loc.get('id')} {loc.get('name')!r} "
+                f"sensor={sensor_id} units={units}"
+            )
+            payload = _request(
+                client,
+                f"{OPENAQ_BASE}/sensors/{sensor_id}/hours",
+                {
+                    "datetime_from": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "datetime_to": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "limit": 100,
+                },
+            )
+            results = payload.get("results") or []
+            print(f"  hours meta={json.dumps(payload.get('meta'))}")
+            print(f"  hours results={len(results)}")
+            if results:
+                print("  first record:", json.dumps(results[0])[:500])
+            else:
+                raw = _request(
+                    client,
+                    f"{OPENAQ_BASE}/sensors/{sensor_id}/measurements",
+                    {
+                        "datetime_from": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "datetime_to": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "limit": 3,
+                    },
+                )
+                print(f"  measurements results={len(raw.get('results') or [])}")
+                if raw.get("results"):
+                    print("  first measurement:", json.dumps(raw["results"][0])[:400])
     return 0
 
 
