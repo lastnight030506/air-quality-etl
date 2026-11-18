@@ -126,7 +126,6 @@ def _probe(args: argparse.Namespace) -> int:
 
     from .openaq import _request, fetch_locations
 
-    start = datetime.now(tz=UTC) - timedelta(days=2)
     end = datetime.now(tz=UTC)
     with httpx.Client(timeout=30.0) as client:
         for city in args.cities:
@@ -156,33 +155,32 @@ def _probe(args: argparse.Namespace) -> int:
                 f"  sample station id={loc.get('id')} {loc.get('name')!r} "
                 f"sensor={sensor_id} units={units}"
             )
-            payload = _request(
-                client,
-                f"{OPENAQ_BASE}/sensors/{sensor_id}/hours",
-                {
-                    "datetime_from": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "datetime_to": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "limit": 100,
-                },
-            )
-            results = payload.get("results") or []
-            print(f"  hours meta={json.dumps(payload.get('meta'))}")
-            print(f"  hours results={len(results)}")
-            if results:
-                print("  first record:", json.dumps(results[0])[:500])
-            else:
-                raw = _request(
+            # The station's own reported coverage tells us whether a zero result
+            # means "no data in this window" or "this station stopped years ago".
+            meta = _request(client, f"{OPENAQ_BASE}/sensors/{sensor_id}", {})
+            result = (meta.get("results") or [{}])[0]
+            print(f"  datetimeFirst={result.get('datetimeFirst')}")
+            print(f"  datetimeLast={result.get('datetimeLast')}")
+            print(f"  latest={json.dumps(result.get('latest'))[:200]}")
+            for label, days in (("2d", 2), ("90d", 90), ("365d", 365)):
+                window_start = datetime.now(tz=UTC) - timedelta(days=days)
+                payload = _request(
                     client,
-                    f"{OPENAQ_BASE}/sensors/{sensor_id}/measurements",
+                    f"{OPENAQ_BASE}/sensors/{sensor_id}/hours",
                     {
-                        "datetime_from": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "datetime_from": window_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
                         "datetime_to": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                        "limit": 3,
+                        "limit": 100,
                     },
                 )
-                print(f"  measurements results={len(raw.get('results') or [])}")
-                if raw.get("results"):
-                    print("  first measurement:", json.dumps(raw["results"][0])[:400])
+                results = payload.get("results") or []
+                print(
+                    f"  hours[{label}] found={(payload.get('meta') or {}).get('found')}"
+                    f" returned={len(results)}"
+                )
+                if results:
+                    print("  first record:", json.dumps(results[0])[:420])
+                    break
     return 0
 
 
