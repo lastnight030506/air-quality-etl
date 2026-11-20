@@ -148,18 +148,64 @@ def test_full_pipeline_writes_parquet_and_chart(monkeypatch, tmp_path):
 
 
 def test_gap_filling_marks_absent_hours(monkeypatch):
-    """The API omits missing hours; the spine must restore them as flagged."""
-    transport = _transport(pm25_values=[5.0] * 12, no2_values=[0.01] * 12)
-    raw = _extract(monkeypatch, transport)
-    filled = gaps.fill_gaps(units.to_ugm3(raw), START, START + timedelta(hours=24))
+    """The API omits missing hours; the spine must restore them as flagged.
 
-    pm = filled.filter(pl.col("parameter") == "pm25")
-    assert len(pm) == 24
-    assert pm["qc_missing"].sum() == 12
+    The gap is in the middle of the station's reporting life. A trailing absence
+    is deliberately NOT counted: that is a retired station, not a gap, and is
+    bounded by the last reading instead.
+    """
+    from datetime import UTC, datetime
+
+    now = datetime.now(tz=UTC).replace(minute=0, second=0, microsecond=0)
+    window_start = now - timedelta(hours=30)
+
+    def row(hour: int, value: float) -> dict:
+        return {
+            "value": value,
+            "parameter": {"units": "µg/m³"},
+            "period": {
+                "datetimeFrom": {"utc": (window_start + timedelta(hours=hour)).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ")},
+                "datetimeTo": {"utc": (window_start + timedelta(hours=hour + 1)).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ")},
+            },
+            "coverage": {"percentComplete": 100.0},
+        }
+
+    # Hours 0-9 present, 10-19 absent, 20-29 present: a 10-hour outage mid-life.
+    results = [row(h, 5.0) for h in range(10)] + [row(h, 5.0) for h in range(20, 30)]
+
+    monkeypatch.setenv("OPENAQ_API_KEY", "test-key")
+    real = httpx.Client
+
+    def patched(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(
+            lambda request: httpx.Response(200, json={"meta": {}, "results": results})
+            if "/hours" in request.url.path
+            else httpx.Response(200, json={"meta": {"found": 1}, "results": [
+                {
+                    "id": 4242,
+                    "name": "Test Station",
+                    "isMobile": False,
+                    "datetimeLast": {"utc": now.strftime("%Y-%m-%dT%H:%M:%SZ")},
+                    "sensors": [{"id": 900, "parameter": {"id": 2, "units": "µg/m³"}}],
+                }
+            ]})
+        )
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(openaq.httpx, "Client", patched)
+
+    from aqetl.config import CITIES as CONFIGURED
+
+    raw = openaq.fetch_all(window_start, now, cities=(CONFIGURED[0],))
+    filled = gaps.fill_gaps(units.to_ugm3(raw), window_start, now)
+
+    assert len(filled) == 30
+    assert filled["qc_missing"].sum() == 10
 
     rate = gaps.missing_rate(filled)
-    pm_rate = rate.filter(pl.col("parameter") == "pm25")
-    assert pm_rate["missing_pct"].to_list() == [50.0]
+    assert rate["missing_pct"].to_list() == [pytest.approx(100 / 3, abs=0.01)]
 
 
 def test_spine_does_not_invent_a_boundary_hour():
