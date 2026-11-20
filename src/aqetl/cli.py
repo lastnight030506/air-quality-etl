@@ -153,8 +153,12 @@ def _discover(args: argparse.Namespace) -> int:
     print(f"localities with a station reporting in the last {args.days} days:")
     for name, count in localities.most_common():
         print(
-            f"  {name[:40]:42} stations={count:3d} newest={newest[name]} "
-            f"params={','.join(sorted(params[name]))}"
+            "LOC|{}|{}|{}|{}".format(
+                name.replace("|", "/") or "unknown",
+                count,
+                newest[name],
+                ",".join(sorted(params[name])) or "none",
+            )
         )
     print(f"  [diag] pages={page} fetched={fetched} recent={sum(localities.values())} "
           f"max_datetimeLast={max((x for x in all_last if x), default='none')}")
