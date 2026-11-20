@@ -105,6 +105,56 @@ def _run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _discover(args: argparse.Namespace) -> int:
+    """Rank Vietnamese localities by how recently a station there reported.
+
+    Written because the brief named three cities and only two turned out to have
+    live OpenAQ stations; the coverage has to be measured, not assumed.
+    """
+    from collections import Counter, defaultdict
+
+    import httpx
+
+    from .openaq import _request
+
+    cutoff = (datetime.now(tz=UTC) - timedelta(days=args.days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    localities: Counter[str] = Counter()
+    newest: dict[str, str] = {}
+    params: dict[str, set[str]] = defaultdict(set)
+    page = 1
+    with httpx.Client(timeout=30.0) as client:
+        while page <= 20:
+            payload = _request(
+                client,
+                f"{OPENAQ_BASE}/locations",
+                {"iso": "VN", "limit": 1000, "page": page},
+            )
+            batch = payload.get("results") or []
+            for loc in batch:
+                last = (loc.get("datetimeLast") or {}).get("utc") or ""
+                if last < cutoff:
+                    continue
+                name = (loc.get("locality") or "unknown").strip()
+                localities[name] += 1
+                if last > newest.get(name, ""):
+                    newest[name] = last
+                for sensor in loc.get("sensors") or []:
+                    pid = (sensor.get("parameter") or {}).get("id")
+                    if pid in PARAMETERS:
+                        params[name].add(PARAMETERS[pid])
+            if len(batch) < 1000:
+                break
+            page += 1
+
+    print(f"localities with a station reporting in the last {args.days} days:")
+    for name, count in localities.most_common():
+        print(
+            f"  {name[:40]:42} stations={count:3d} newest={newest[name]} "
+            f"params={','.join(sorted(params[name]))}"
+        )
+    return 0
+
+
 def _report() -> int:
     paths = report.write_report(ROOT)
     for name, path in paths.items():
@@ -245,6 +295,9 @@ def build_parser() -> argparse.ArgumentParser:
     probe.add_argument("--meteo-start", type=_parse_date,
                        default=date.today() - timedelta(days=90))
     probe.add_argument("--meteo-end", type=_parse_date, default=date.today())
+
+    discover = sub.add_parser("discover", help="rank Vietnamese localities by live station count")
+    discover.add_argument("--days", type=int, default=7)
     return parser
 
 
@@ -258,6 +311,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run(args)
         if args.command == "probe":
             return _probe(args)
+        if args.command == "discover":
+            return _discover(args)
         return _report()
     except Exception as exc:  # the workflow wants a legible one-line failure
         print(f"aqetl {args.command}: {exc}", file=sys.stderr)
