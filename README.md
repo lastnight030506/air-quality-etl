@@ -18,12 +18,12 @@ Over the 90 days to 18 November 2026, from the stations reporting in the window:
 
 | City | Pollutant | Mean | Max 1 h | Days over QCVN 24 h | Days over WHO 24 h |
 |---|---|---|---|---|---|
-| Hanoi | PM2.5 | 35.5 µg/m³ | 165 | **35 / 90** | **90 / 90** |
-| Hanoi | PM10 | 57.1 µg/m³ | 281 | 8 / 90 | 70 / 90 |
-| HCMC | PM2.5 | 30.7 µg/m³ | 128 | 9 / 90 | 88 / 90 |
+| Hanoi | PM2.5 | 35.4 µg/m³ | 165 | **35 / 90** | **88 / 90** |
+| Hanoi | PM10 | 57.6 µg/m³ | 281 | 8 / 90 | 69 / 90 |
+| HCMC | PM2.5 | 30.8 µg/m³ | 128 | 9 / 90 | 88 / 90 |
 
-Hanoi spent **39% of days above the national 24-hour PM2.5 limit**, and no single
-day in either city met the WHO guideline. That gap — a legal limit that is three
+Hanoi spent **39% of days above the national 24-hour PM2.5 limit**, and 98% of
+days in both cities exceeded the WHO guideline. That gap — a legal limit three
 times looser than the health-based one — is the finding the chart exists to make
 visible.
 
