@@ -11,7 +11,7 @@ for one parameter the first sensor's rows win: one row per station-hour.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import polars as pl
 
@@ -19,6 +19,9 @@ from . import align, schema
 from .schema import CURATED_KEY, CURATED_SCHEMA, QC_FLAG_COLUMNS
 
 _GROUP = ["city", "station_id", "parameter"]
+
+# Hourly means publish a couple of hours after the hour closes.
+PUBLISH_LAG_HOURS = 2
 
 
 def _ensure_columns(df: pl.DataFrame) -> pl.DataFrame:
@@ -55,7 +58,14 @@ def fill_gaps(df: pl.DataFrame, start: datetime, end: datetime) -> pl.DataFrame:
         if received.is_empty():
             continue
         spine_start = max(start, received["hour_utc"].min())
-        spine_end = end - timedelta(hours=1)
+        # Cap at the last hour that can actually have been published. The window
+        # ends at midnight tomorrow, and hourly means land a couple of hours
+        # after the hour closes, so an uncapped spine marks un-elapsed hours as
+        # missing and charges every station for them equally.
+        now_hour = datetime.now(tz=UTC).replace(minute=0, second=0, microsecond=0)
+        spine_end = min(end - timedelta(hours=1), now_hour - timedelta(hours=PUBLISH_LAG_HOURS))
+        if spine_end < spine_start:
+            continue
         spine = align.hourly_spine(spine_start, spine_end, city, station_id, parameter)
         # The curated key has no sensor_id, so two sensors on one parameter would
         # collide: prefer a real reading over a null, then the lowest sensor id.

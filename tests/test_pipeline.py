@@ -196,3 +196,34 @@ def test_empty_store_renders_chart_rather_than_failing(tmp_path):
     assert out.exists() and out.stat().st_size > 1000
     assert schema.empty_curated().is_empty()
     assert openmeteo.TIMEZONE == "Asia/Ho_Chi_Minh"
+
+
+def test_spine_never_counts_unelapsed_hours_as_missing():
+    """A run at 02:00 must not charge stations for hours later today.
+
+    The extract window ends at midnight tomorrow, so an uncapped spine marks
+    every un-elapsed hour as missing and inflates coverage loss for everyone.
+    """
+    from datetime import datetime
+
+    now = datetime.now(tz=UTC).replace(minute=0, second=0, microsecond=0)
+    observed_hour = now - timedelta(hours=6)
+    df = pl.DataFrame(
+        {
+            "city": ["hanoi"],
+            "station_id": [1],
+            "sensor_id": [9],
+            "parameter": ["pm25"],
+            "hour_utc": [observed_hour],
+            "value_raw": [10.0],
+        },
+        schema_overrides={"hour_utc": pl.Datetime("us", "UTC")},
+    )
+    # Ask for a window running to the end of tomorrow, as the CLI does.
+    filled = gaps.fill_gaps(
+        df, observed_hour, datetime.now(tz=UTC).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ) + timedelta(days=1)
+    )
+    future = filled.filter(pl.col("hour_utc") > now)
+    assert future.height == 0
