@@ -121,6 +121,8 @@ def _discover(args: argparse.Namespace) -> int:
     localities: Counter[str] = Counter()
     newest: dict[str, str] = {}
     params: dict[str, set[str]] = defaultdict(set)
+    all_last: list[str] = []
+    fetched = 0
     page = 1
     with httpx.Client(timeout=30.0) as client:
         while page <= 20:
@@ -130,8 +132,10 @@ def _discover(args: argparse.Namespace) -> int:
                 {"iso": "VN", "limit": 1000, "page": page},
             )
             batch = payload.get("results") or []
+            fetched += len(batch)
             for loc in batch:
                 last = (loc.get("datetimeLast") or {}).get("utc") or ""
+                all_last.append(last)
                 if last < cutoff:
                     continue
                 name = (loc.get("locality") or "unknown").strip()
@@ -152,6 +156,8 @@ def _discover(args: argparse.Namespace) -> int:
             f"  {name[:40]:42} stations={count:3d} newest={newest[name]} "
             f"params={','.join(sorted(params[name]))}"
         )
+    print(f"  [diag] pages={page} fetched={fetched} recent={sum(localities.values())} "
+          f"max_datetimeLast={max((x for x in all_last if x), default='none')}")
     return 0
 
 
