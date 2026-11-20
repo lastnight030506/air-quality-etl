@@ -138,6 +138,22 @@ def _discover(args: argparse.Namespace) -> int:
                 all_last.append(last)
                 if last < cutoff:
                     continue
+                coords = loc.get("coordinates") or {}
+                hits = sorted({
+                    PARAMETERS[(s.get("parameter") or {}).get("id")]
+                    for s in (loc.get("sensors") or [])
+                    if (s.get("parameter") or {}).get("id") in PARAMETERS
+                })
+                print(
+                    "ST|{}|{}|{:.3f},{:.3f}|{}|{}".format(
+                        (loc.get("locality") or "").strip() or "-",
+                        (loc.get("name") or "").replace("|", "/")[:38],
+                        coords.get("latitude") or 0,
+                        coords.get("longitude") or 0,
+                        last,
+                        ",".join(hits) or "none",
+                    )
+                )
                 name = (loc.get("locality") or "unknown").strip()
                 localities[name] += 1
                 if last > newest.get(name, ""):

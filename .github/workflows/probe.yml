@@ -26,4 +26,4 @@ jobs:
       - name: Rank Vietnamese localities by live coverage
         env:
           OPENAQ_API_KEY: ${{ secrets.OPENAQ_API_KEY }}
-        run: uv run python -m aqetl discover --days 7
+        run: uv run python -m aqetl discover --days 90
