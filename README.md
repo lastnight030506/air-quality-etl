@@ -1,10 +1,10 @@
 # Air Quality & Weather ETL — Vietnam
 
-Automated hourly air-quality pipeline for **Hanoi**, **Da Nang** and **Ho Chi Minh
-City**. A GitHub Action runs it twice a day, pulls real measurements from OpenAQ
-stations and meteorological data from Open-Meteo, applies QA/QC rules, benchmarks
-the result against **QCVN 05:2023/BTNMT** and **WHO 2021**, stores it as Parquet
-read by **DuckDB**, and refreshes the chart below. No local machine involved.
+Automated hourly air-quality pipeline for **Hanoi** and **Ho Chi Minh City**. A
+GitHub Action runs it twice a day, pulls real measurements from OpenAQ stations
+and meteorological data from Open-Meteo, applies QA/QC rules, benchmarks the
+result against **QCVN 05:2023/BTNMT** and **WHO 2021**, stores it as Parquet read
+by **DuckDB**, and refreshes the chart below. No local machine involved.
 
 ![30-day air quality trend and per-station data quality](charts/aq-30d.png)
 
@@ -34,9 +34,11 @@ This is the part most air-quality projects paper over.
 - **Only PM2.5 and PM10 are available.** No OpenAQ station in scope reports NO2
   or O3 for this window, so those parameters are configured but empty. The
   pipeline queries them; nothing comes back.
-- **Da Nang has no OpenAQ station within 25 km.** Not a bug and not a filter
-  problem — the city is simply uncovered on this network. The chart says so
-  rather than drawing a line through nothing.
+- **Only two cities exist on this network.** All 63 Vietnamese locations on
+  OpenAQ were checked: 11 reported inside a 90-day window, and every one of them
+  is in Hanoi or Ho Chi Minh City. Da Nang returns zero locations within 25 km;
+  so does every other Vietnamese city tried. `aqetl discover` reproduces this
+  ranking, so the claim is checkable rather than asserted.
 - **Station counts are small**: 5 in Hanoi, 5 in HCMC, with several reporting
   only part of the window. This is volunteer and research infrastructure, not a
   regulatory network.
@@ -195,7 +197,9 @@ actually changed. A zero-row extract exits non-zero rather than committing empty
 reports that look like a healthy run.
 
 `probe.yml` is a manual, read-only diagnostic that prints station coverage per
-city; it is how the Da Nang gap and the retired-station problem were found.
+city; it is how the Da Nang gap and the retired-station problem were found. It
+prints a per-station location table, which is the only way to tell "uncovered
+city" from "broken query".
 
 Add the key as a repository secret:
 
@@ -214,8 +218,10 @@ derived from ERA5.
 
 - **Two of the four targeted pollutants have no data** in this region on OpenAQ.
   The pipeline supports them; the network does not supply them.
-- **Da Nang is uncovered.** Adding it would mean a different source, not a
-  different query.
+- **Two cities, one country.** OpenAQ's live Vietnamese network is Hanoi and
+  HCMC only. A third city would need a different source, not a different query —
+  and a model-derived source is not a station, so the QA/QC story would not
+  apply to it.
 - **Small station count**, with uneven uptime. City means are computed from
   whatever reported that day, so a day with one station is weaker evidence than
   a day with five.

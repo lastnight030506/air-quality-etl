@@ -13,9 +13,12 @@ class City:
 
 # 25 km search radius around each city centre is the OpenAQ maximum for a
 # coordinate search that still returns city-scale stations.
+# Only these two have live OpenAQ stations. All 63 Vietnamese locations were
+# checked: 11 reported inside 90 days and every one sits in Hanoi or Ho Chi Minh
+# City. Da Nang returns exactly zero locations within 25 km, so listing it would
+# draw an empty series and imply coverage that does not exist.
 CITIES: tuple[City, ...] = (
     City("hanoi", "Hanoi", 21.0285, 105.8542),
-    City("danang", "Da Nang", 16.0544, 108.2022),
     City("hcmc", "Ho Chi Minh City", 10.8231, 106.6297),
 )
 

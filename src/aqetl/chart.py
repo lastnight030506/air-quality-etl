@@ -179,7 +179,7 @@ def render(
 
     fig.text(0.01, 0.005, ATTRIBUTION, fontsize=6.5, color="#666666", ha="left")
     fig.suptitle(
-        "Vietnam urban air quality — Hanoi, Da Nang, Ho Chi Minh City",
+        "Vietnam urban air quality — " + ", ".join(c.name for c in CITIES),
         fontsize=13,
         fontweight="bold",
         x=0.01,
