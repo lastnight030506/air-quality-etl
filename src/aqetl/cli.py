@@ -50,6 +50,20 @@ def _run(args: argparse.Namespace) -> int:
     start = datetime.combine(args.since, time.min, tzinfo=UTC)
     end = datetime.combine(args.until + timedelta(days=1), time.min, tzinfo=UTC)
 
+    # Weather is fetched FIRST, before the OpenAQ extract. Ordering is not
+    # cosmetic: once a few hundred OpenAQ requests have run on a GitHub runner,
+    # every later TLS handshake to the met host times out, and fetching weather
+    # afterwards failed 3/3 attempts on every run while the same call in
+    # isolation succeeds in under a second.
+    # Weather is also enrichment, not the deliverable: a met outage must not
+    # discard observations we already paid API calls for.
+    try:
+        weather = fetch_weather(args.since, args.until, cities=args.cities)
+        _log("weather", f"{len(weather)} rows")
+    except Exception as exc:
+        _log("weather", f"unavailable ({exc.__class__.__name__}: {exc}) — continuing")
+        weather = empty_weather()
+
     raw = fetch_all(start, end, cities=args.cities)
     _log("extract", f"{len(raw)} rows")
     if raw.is_empty():
@@ -62,15 +76,6 @@ def _run(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
-
-    # Weather is enrichment, not the deliverable: a met-service outage must not
-    # discard observations we already paid API calls for.
-    try:
-        weather = fetch_weather(args.since, args.until, cities=args.cities)
-        _log("weather", f"{len(weather)} rows")
-    except Exception as exc:
-        _log("weather", f"unavailable ({exc.__class__.__name__}: {exc}) — continuing")
-        weather = empty_weather()
 
     observed = units.to_ugm3(raw)
     observed = fill_gaps(observed, start, end)
