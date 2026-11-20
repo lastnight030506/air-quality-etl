@@ -27,6 +27,37 @@ days in both cities exceeded the WHO guideline. That gap — a legal limit three
 times looser than the health-based one — is the finding the chart exists to make
 visible.
 
+### Sustained exposure, not just daily peaks
+
+A 24-hour mean hides the fact that the air is never clean. `data/reports/rolling.parquet`
+holds a **7-day rolling mean per station**, graded against the *annual*
+guidelines (a 7-day mean is a sustained-exposure statistic; comparing it to a
+24-hour limit would pass almost everything):
+
+| City | Station-days | Above QCVN annual (25 µg/m³) | Above WHO annual (5 µg/m³) | Worst 7-day mean |
+|---|---|---|---|---|
+| Hanoi | 253 | **86%** | **100%** | 82.6 µg/m³ |
+| HCMC | 94 | **83%** | **100%** | 52.6 µg/m³ |
+
+Every station-day in both cities exceeded the WHO annual guideline on a rolling
+basis. There is no clean week in this dataset.
+
+```sql
+-- src/aqetl/report.py :: _ROLLING_SQL
+SELECT city, station_id, hour_utc,
+       avg(value_clean) OVER w AS rolling7,
+       count(value_clean) OVER w AS n7
+FROM curated
+WHERE parameter = 'pm25'
+WINDOW w AS (PARTITION BY city, station_id ORDER BY hour_utc
+             RANGE BETWEEN INTERVAL 6 DAYS PRECEDING AND CURRENT ROW)
+```
+
+`RANGE`, not `ROWS 167 PRECEDING`, because stations have gaps: the window is
+elapsed time, not the last 168 observations. Windows built from fewer than 96 of
+the 168 possible hours are dropped — a mean over a third of the window is not a
+7-day mean.
+
 ## Coverage, stated honestly
 
 This is the part most air-quality projects paper over.
@@ -139,6 +170,7 @@ data/
   reports/daily.parquet                       # 30-day daily means
   reports/station_qc.parquet                  # quality + coverage per station
   reports/exceedance.parquet                  # days over QCVN / WHO
+  reports/rolling.parquet                     # 7-day rolling mean per station
 charts/aq-30d.png
 ```
 
@@ -213,6 +245,79 @@ Air quality data: [OpenAQ](https://openaq.org), aggregated from government and
 research monitoring networks; per-station provider and licence are on OpenAQ
 itself. Meteorological data: [Open-Meteo](https://open-meteo.com) (CC BY 4.0),
 derived from ERA5.
+
+## Design decisions & trade-offs
+
+The interesting part of a pipeline is what it declined to do. These are the four
+calls that shaped this repo, and where each one stops working.
+
+### GitHub Actions, not Airflow or Dagster
+
+**What it buys:** a scheduler, secret store, per-step logs, alerting on failure
+and free minutes on a public repo — with zero infrastructure to run. The job
+commits its own output, so the artefact and the history live in one place.
+
+**What it gives up:** no DAG, no task-level retries, no backfill UI, no SLA
+alerting, no lineage, no catch-up for missed runs, and no way to run *part* of
+the pipeline without editing YAML. Scheduled triggers are also best-effort:
+observed runs land ~7 hours after the cron time, because GitHub deprioritises
+scheduled workflows under load.
+
+**Where it stops:** at roughly three pipelines that depend on each other, or the
+first time you need "re-run last Tuesday cleanly". That is when a scheduler earns
+its ops cost. One job on a fixed cadence does not.
+
+### Full refresh, not incremental watermarks
+
+Every run refetches 90 days and upserts on `(city, station_id, parameter,
+hour_utc)`. That is deliberately wasteful and buys three things: the pipeline is
+**idempotent by construction**, **self-healing** (a bad deploy is fixed by the
+next run, not a repair script), and it has **no watermark state to corrupt or
+drift**.
+
+The cost is request volume: ~40 OpenAQ calls per run for 2 cities. The free tier
+allows 2,000/hour, so there is roughly 50× headroom.
+
+**Where it stops:** the request budget. At 100 stations the same sweep is ~4,000
+calls and no longer fits an hour. Incremental then needs three things this repo
+does not have: a watermark table keyed by sensor, a lookback window (OpenAQ
+revises recent readings, so "last seen" is not "final"), and late-arrival
+handling. The upsert already gives exactly-once semantics, so it is an extension
+rather than a rewrite.
+
+### Parquet in git, not object storage or a warehouse
+
+**What it buys:** the data is diffable, reviewable and free. The workflow commits
+the chart and the store in one commit, so a code change and its effect on the
+data are visible together. No credentials, no service to rot, and DuckDB reads
+the partition glob directly.
+
+**What it gives up:** no concurrent writers (two runs pushing the same file
+conflict), no row-level access control, no queries from outside a checkout, and
+git stores every rewrite, so history grows monotonically. Monthly partitions and
+a 400-day retention prune bound that; a full-refresh of a month rewrites one
+blob, not the archive.
+
+**Where it stops:** as soon as more than one process writes, or a consumer needs
+the data without a git clone. The layout is already hive-partitioned
+(`city=<key>/part-<YYYY-MM>.parquet`), so moving it to S3/R2 behind DuckDB
+`httpfs` — or to a warehouse — is a path change, not a redesign.
+
+### What breaks at 1000× (1000 stations, 4 pollutants)
+
+Extrapolating honestly, in the order things fail:
+
+| Limit | At 1000× | What it needs |
+|---|---|---|
+| **Git history** | ~35M rows/year, 1–2 GB, rewritten on every touch | Object storage; git keeps code and chart only |
+| **OpenAQ free tier** | ~4,000 calls per sweep vs 2,000/hour | Batching, longer interval, or a paid tier |
+| **Runner timeout** | 4,000 sequential calls at ~200 ms ≈ 13 min of pure latency, plus retries; the job is capped at 20 min | Concurrency, or a matrix of sharded jobs |
+| **Chart** | 1,000 stations cannot be 12 bars | Aggregate to city percentiles; per-station drill-down separately |
+| **Report SQL** | 24 h windows over 35M rows still fit DuckDB, but the `RANGE` window will want pruning | Pre-aggregate, or partition by parameter as well |
+
+The things that would *not* break: Parquet as a format, DuckDB as the query
+engine, the QA/QC rules (all per-sensor and streaming-friendly), and the schema
+contract. Those were the parts chosen to survive the data growing.
 
 ## Limitations
 

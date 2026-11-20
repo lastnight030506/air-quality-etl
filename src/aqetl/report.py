@@ -109,6 +109,65 @@ def _window(days: int, today: date) -> tuple[datetime, datetime]:
     return start, datetime.combine(today + timedelta(days=1), time.min, tzinfo=UTC)
 
 
+# A 7-day rolling mean answers a different question from the 24 h limits: it is
+# sustained exposure, so it is graded against the ANNUAL guidelines. Comparing a
+# 7-day mean to a 24 h limit would pass almost everything and flatter the result.
+# The window is a RANGE over the timestamp, not 168 ROWS, so a station with gaps
+# gets a mean over elapsed time rather than over its last 168 observations.
+_ROLLING_SQL = """
+WITH hourly AS (
+    SELECT city, station_id, hour_utc, value_clean
+    FROM curated
+    WHERE hour_utc >= ? AND hour_utc < ? AND parameter = ?
+), rolled AS (
+    SELECT city, station_id, hour_utc,
+           CAST(hour_utc AS TIMESTAMP) AS ts,
+           avg(value_clean) OVER w AS rolling7_ugm3,
+           count(value_clean) OVER w AS n7
+    FROM hourly
+    WINDOW w AS (PARTITION BY city, station_id ORDER BY hour_utc
+                 RANGE BETWEEN INTERVAL 6 DAYS PRECEDING AND CURRENT ROW)
+), last_of_day AS (
+    SELECT *,
+           row_number() OVER (
+               PARTITION BY city, station_id, CAST(ts AS DATE) ORDER BY ts DESC
+           ) AS rn
+    FROM rolled
+)
+SELECT t.city, t.station_id, CAST(t.ts AS DATE) AS day,
+       t.rolling7_ugm3, t.n7,
+       lmt.qcvn_annual, lmt.who_annual,
+       t.rolling7_ugm3 > lmt.qcvn_annual AS over_qcvn_annual,
+       t.rolling7_ugm3 > lmt.who_annual  AS over_who_annual
+FROM last_of_day t
+JOIN limits lmt ON lmt.parameter = ? AND lmt.d = CAST(t.ts AS DATE)
+-- 96 of the 168 hours in the window: a rolling mean built from a third of the
+-- window is not a 7-day mean.
+WHERE t.rn = 1 AND t.n7 >= 96
+ORDER BY t.city, t.station_id, day
+"""
+
+
+def build_rolling(
+    root: Path = DEFAULT_ROOT,
+    days: int = 90,
+    today: date | None = None,
+    parameter: str = "pm25",
+) -> pl.DataFrame:
+    """7-day rolling mean per station, graded against annual guidelines."""
+    today = today or date.today()
+    start, end = _window(days, today)
+    con = storage.duck_conn(root)
+    try:
+        _with_limits(con, days, today)
+        return _conform(
+            storage.fetch(con, _ROLLING_SQL, [start, end, parameter, parameter]),
+            ROLLING_SCHEMA,
+        )
+    finally:
+        con.close()
+
+
 # Declared outputs: DuckDB on an empty store yields Object columns, which parquet
 # cannot take, and the report is written on a fresh checkout too.
 DAILY_SCHEMA = {
@@ -135,6 +194,18 @@ STATION_QC_SCHEMA = {
     "anomaly_pct": pl.Float64,
 }
 
+ROLLING_SCHEMA = {
+    "city": pl.String,
+    "station_id": pl.Int64,
+    "day": pl.Date,
+    "rolling7_ugm3": pl.Float64,
+    "n7": pl.Int64,
+    "qcvn_annual": pl.Float64,
+    "who_annual": pl.Float64,
+    "over_qcvn_annual": pl.Boolean,
+    "over_who_annual": pl.Boolean,
+}
+
 EXCEEDANCE_SCHEMA = {
     "city": pl.String,
     "parameter": pl.String,
@@ -152,7 +223,8 @@ def _conform(frame: pl.DataFrame, contract: dict[str, pl.DataType]) -> pl.DataFr
 def _with_limits(con: duckdb.DuckDBPyConnection, days: int, today: date) -> None:
     """Load (parameter, day, limit) for the window; limits resolved in standards."""
     con.execute(
-        "CREATE TABLE limits (parameter VARCHAR, d DATE, qcvn DOUBLE, who DOUBLE)"
+        "CREATE TABLE limits (parameter VARCHAR, d DATE, qcvn DOUBLE, who DOUBLE,"
+        " qcvn_annual DOUBLE, who_annual DOUBLE)"
     )
     rows = [
         (
@@ -160,13 +232,15 @@ def _with_limits(con: duckdb.DuckDBPyConnection, days: int, today: date) -> None
             day,
             standards.limit_for("qcvn", parameter, "24h", day),
             standards.limit_for("who", parameter, "24h", day),
+            standards.limit_for("qcvn", parameter, "annual", day),
+            standards.limit_for("who", parameter, "annual", day),
         )
         for day in pl.date_range(
             today - timedelta(days=days - 1), today, interval="1d", eager=True
         ).to_list()
         for parameter in PARAMETER_ORDER
     ]
-    con.executemany("INSERT INTO limits VALUES (?, ?, ?, ?)", rows)
+    con.executemany("INSERT INTO limits VALUES (?, ?, ?, ?, ?, ?)", rows)
 
 
 def build_daily(
@@ -218,6 +292,7 @@ def write_report(
         "daily": build_daily(root, 30, today),
         "station_qc": build_station_qc(root, 30, today),
         "exceedance": build_exceedance(root, 90, today),
+        "rolling": build_rolling(root, 90, today),
     }
     paths: dict[str, Path] = {}
     for name, frame in frames.items():
@@ -228,6 +303,7 @@ def write_report(
 
 __all__ = [
     "build_daily",
+    "build_rolling",
     "build_exceedance",
     "build_station_qc",
     "write_report",
