@@ -171,3 +171,49 @@ def test_retired_stations_are_not_selected_over_live_ones(monkeypatch):
     assert queried == [900], f"queried retired sensors: {queried}"
     assert len(frame) == 1
     assert frame["station_name"].to_list() == ["Live"]
+
+
+def test_transient_500_is_retried(monkeypatch):
+    """One 500 killed a whole scheduled run; 5xx is transient and must retry."""
+    monkeypatch.setenv("OPENAQ_API_KEY", "test-key")
+    monkeypatch.setattr(openaq, "_BACKOFF_S", 0.0)
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        if len(calls) == 1:
+            return httpx.Response(500, json={"message": "boom"})
+        return httpx.Response(200, json={"meta": {"found": 0}, "results": []})
+
+    real = httpx.Client
+
+    def patched(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(openaq.httpx, "Client", patched)
+    with httpx.Client() as client:
+        payload = openaq._request(client, f"{openaq.OPENAQ_BASE}/locations", {})
+    assert payload["results"] == []
+    assert len(calls) == 2
+
+
+def test_401_is_not_retried(monkeypatch):
+    """A bad key must fail immediately, not burn four requests."""
+    monkeypatch.setenv("OPENAQ_API_KEY", "test-key")
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(401, json={"message": "unauthorized"})
+
+    real = httpx.Client
+
+    def patched(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(openaq.httpx, "Client", patched)
+    with httpx.Client() as client, pytest.raises(RuntimeError, match="OPENAQ_API_KEY"):
+        openaq._request(client, f"{openaq.OPENAQ_BASE}/locations", {})
+    assert len(calls) == 1

@@ -36,7 +36,9 @@ _MISSING_KEY = (
 
 _LOCATION_PAGE = 100
 _MAX_LOCATION_PAGES = 5
-_MAX_429_RETRIES = 3
+_MAX_RETRIES = 4
+_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+_BACKOFF_S = 2.0
 _PAGE_SLEEP_S = 0.05
 _DEFAULT_RESET_S = 60
 
@@ -86,10 +88,19 @@ def _reset_seconds(response: httpx.Response) -> int:
 def _request(client: httpx.Client, url: str, params: dict) -> dict:
     headers = {"X-API-Key": _api_key()}
     response = client.get(url, params=params, headers=headers)
-    for _ in range(_MAX_429_RETRIES):
-        if response.status_code != 429:
+    for attempt in range(_MAX_RETRIES):
+        if response.status_code not in _RETRY_STATUSES:
             break
-        time.sleep(_reset_seconds(response))
+        if attempt == _MAX_RETRIES - 1:
+            break
+        # 429 tells us when to come back; a 5xx is transient by nature and a
+        # fixed backoff is all we can do. One 500 killed a whole run before.
+        delay = (
+            _reset_seconds(response)
+            if response.status_code == 429
+            else _BACKOFF_S * (attempt + 1)
+        )
+        time.sleep(delay)
         response = client.get(url, params=params, headers=headers)
     if response.status_code == 401:
         raise RuntimeError(_MISSING_KEY)
