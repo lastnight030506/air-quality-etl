@@ -20,17 +20,17 @@ reporting in that window.
 
 | City | Pollutant | Days evaluated | Over QCVN 24 h | Over WHO 24 h | 90-day mean ratio vs QCVN |
 |---|---|---|---|---|---|
-| Hanoi | PM10 | 89 | **8** | **69** | 0.58× |
-| Hanoi | PM2.5 | 89 | **37** | **88** | 0.80× |
-| Ho Chi Minh City | PM2.5 | 89 | **9** | **87** | 0.69× |
+| Hanoi | PM10 | 90 | **8** | **70** | 0.58× |
+| Hanoi | PM2.5 | 90 | **38** | **89** | 0.80× |
+| Ho Chi Minh City | PM2.5 | 90 | **9** | **88** | 0.69× |
 
 7-day rolling mean per station, graded against the **annual** guidelines
 (sustained exposure, not daily peaks):
 
 | City | Station-days | Above QCVN annual (25 µg/m³) | Above WHO annual (5 µg/m³) | Worst 7-day mean |
 |---|---|---|---|---|
-| Hanoi | 250 | **85.2%** | **100.0%** | 82.6 µg/m³ |
-| Ho Chi Minh City | 95 | **86.3%** | **100.0%** | 52.6 µg/m³ |
+| Hanoi | 252 | **85.3%** | **100.0%** | 82.6 µg/m³ |
+| Ho Chi Minh City | 97 | **86.6%** | **100.0%** | 52.6 µg/m³ |
 <!-- RESULTS:END -->
 
 ### Sustained exposure, not just daily peaks
