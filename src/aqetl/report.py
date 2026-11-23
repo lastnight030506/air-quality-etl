@@ -301,8 +301,91 @@ def write_report(
     return paths
 
 
+_PARAM_LABEL = {"pm25": "PM2.5", "pm10": "PM10"}
+_CITY_LABEL = {"hanoi": "Hanoi", "hcmc": "Ho Chi Minh City"}
+
+def _city(key: str) -> str:
+    return _CITY_LABEL.get(key, key.title())
+
+_README_START = "<!-- RESULTS:START -->"
+_README_END = "<!-- RESULTS:END -->"
+
+
+def _results_markdown(root: Path, today: date) -> str:
+    """The results tables, regenerated from the store.
+
+    These are written into the README between markers on every run, because a
+    README quoting "35 of 90 days" goes stale the moment the window slides, and
+    stale numbers in a live-data repo are worse than no numbers.
+    """
+    ex = build_exceedance(root, 90, today)
+    roll = build_rolling(root, 90, today)
+    lines = [
+        f"Rolling 90-day window ending **{today.isoformat()}**, from the stations",
+        "reporting in that window.",
+        "",
+        "| City | Pollutant | Days evaluated | Over QCVN 24 h | Over WHO 24 h "
+        "| 90-day mean ratio vs QCVN |",
+        "|---|---|---|---|---|---|",
+    ]
+    for row in ex.sort("city", "parameter").iter_rows(named=True):
+        lines.append(
+            f"| {_city(row['city'])} | {_PARAM_LABEL.get(row['parameter'], row['parameter'])} "
+            f"| {row['days_evaluated']} | **{row['days_over_qcvn']}** | "
+            f"**{row['days_over_who']}** | {row['mean_ratio_qcvn']:.2f}× |"
+        )
+    if not roll.is_empty():
+        lines += [
+            "",
+            "7-day rolling mean per station, graded against the **annual** guidelines",
+            "(sustained exposure, not daily peaks):",
+            "",
+            "| City | Station-days | Above QCVN annual (25 µg/m³) "
+            "| Above WHO annual (5 µg/m³) | Worst 7-day mean |",
+            "|---|---|---|---|---|",
+        ]
+        for row in (
+            roll.group_by("city")
+            .agg(
+                pl.len().alias("sd"),
+                (100 * pl.col("over_qcvn_annual").mean()).round(1).alias("pct_qcvn"),
+                (100 * pl.col("over_who_annual").mean()).round(1).alias("pct_who"),
+                pl.col("rolling7_ugm3").max().round(1).alias("max7"),
+            )
+            .sort("city")
+            .iter_rows(named=True)
+        ):
+            lines.append(
+                f"| {_city(row['city'])} | {row['sd']} | **{row['pct_qcvn']}%** "
+                f"| **{row['pct_who']}%** | {row['max7']} µg/m³ |"
+            )
+    return "\n".join(lines)
+
+
+def update_readme(
+    root: Path = DEFAULT_ROOT,
+    readme: Path = Path("README.md"),
+    today: date | None = None,
+) -> bool:
+    """Rewrite the results block in place. Returns True if it changed."""
+    if not readme.exists():
+        return False
+    text = readme.read_text()
+    start = text.find(_README_START)
+    end = text.find(_README_END)
+    if start == -1 or end == -1:
+        return False
+    body = _results_markdown(root, today or date.today())
+    updated = text[: start + len(_README_START)] + "\n" + body + "\n" + text[end:]
+    if updated == text:
+        return False
+    readme.write_text(updated)
+    return True
+
+
 __all__ = [
     "build_daily",
+    "update_readme",
     "build_rolling",
     "build_exceedance",
     "build_station_qc",

@@ -91,3 +91,29 @@ def test_empty_store_returns_typed_empty_frame(tmp_path):
     frame = report.build_rolling(tmp_path, days=12, today=TODAY)
     assert frame.is_empty()
     assert dict(frame.schema) == report.ROLLING_SCHEMA
+
+
+def test_readme_results_block_is_rewritten_between_markers(tmp_path):
+    """README numbers must track the data, or they go stale on every run."""
+    _seed(tmp_path, dict.fromkeys(range(12 * 24), 90.0))
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        "# T\n\n<!-- RESULTS:START -->\nstale 99 / 99\n<!-- RESULTS:END -->\n\nfooter\n"
+    )
+
+    assert report.update_readme(tmp_path, readme, today=TODAY) is True
+    text = readme.read_text()
+
+    assert "stale 99 / 99" not in text
+    assert "Hanoi" in text
+    assert text.startswith("# T")
+    assert "footer" in text
+    # Idempotent: a second pass with unchanged data writes nothing.
+    assert report.update_readme(tmp_path, readme, today=TODAY) is False
+
+
+def test_readme_without_markers_is_left_alone(tmp_path):
+    readme = tmp_path / "README.md"
+    readme.write_text("# No markers here\n")
+    assert report.update_readme(tmp_path, readme, today=TODAY) is False
+    assert readme.read_text() == "# No markers here\n"

@@ -52,6 +52,9 @@ jobs:
           # data/ may not exist if no station reported; charts/ always does.
           [ -d data ] && git add data || true
           [ -d charts ] && git add charts || true
+          # The results tables in the README are regenerated from the store, so
+          # they have to be staged or the published numbers drift from the data.
+          git add README.md
           if git diff --staged --quiet; then
             echo "No changes to commit."
             exit 0

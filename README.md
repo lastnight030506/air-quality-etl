@@ -14,33 +14,32 @@ by **DuckDB**, and refreshes the chart below. No local machine involved.
 
 ## What it found
 
-Over the 90 days to 18 November 2026, from the stations reporting in the window:
+<!-- RESULTS:START -->
+Rolling 90-day window ending **2026-11-23**, from the stations
+reporting in that window.
 
-| City | Pollutant | Mean | Max 1 h | Days over QCVN 24 h | Days over WHO 24 h |
+| City | Pollutant | Days evaluated | Over QCVN 24 h | Over WHO 24 h | 90-day mean ratio vs QCVN |
 |---|---|---|---|---|---|
-| Hanoi | PM2.5 | 35.4 µg/m³ | 165 | **35 / 90** | **88 / 90** |
-| Hanoi | PM10 | 57.6 µg/m³ | 281 | 8 / 90 | 69 / 90 |
-| HCMC | PM2.5 | 30.8 µg/m³ | 128 | 9 / 90 | 88 / 90 |
+| Hanoi | PM10 | 89 | **8** | **69** | 0.58× |
+| Hanoi | PM2.5 | 89 | **37** | **88** | 0.80× |
+| Ho Chi Minh City | PM2.5 | 89 | **9** | **87** | 0.69× |
 
-Hanoi spent **39% of days above the national 24-hour PM2.5 limit**, and 98% of
-days in both cities exceeded the WHO guideline. That gap — a legal limit three
-times looser than the health-based one — is the finding the chart exists to make
-visible.
-
-### Sustained exposure, not just daily peaks
-
-A 24-hour mean hides the fact that the air is never clean. `data/reports/rolling.parquet`
-holds a **7-day rolling mean per station**, graded against the *annual*
-guidelines (a 7-day mean is a sustained-exposure statistic; comparing it to a
-24-hour limit would pass almost everything):
+7-day rolling mean per station, graded against the **annual** guidelines
+(sustained exposure, not daily peaks):
 
 | City | Station-days | Above QCVN annual (25 µg/m³) | Above WHO annual (5 µg/m³) | Worst 7-day mean |
 |---|---|---|---|---|
-| Hanoi | 253 | **86%** | **100%** | 82.6 µg/m³ |
-| HCMC | 94 | **83%** | **100%** | 52.6 µg/m³ |
+| Hanoi | 250 | **85.2%** | **100.0%** | 82.6 µg/m³ |
+| Ho Chi Minh City | 95 | **86.3%** | **100.0%** | 52.6 µg/m³ |
+<!-- RESULTS:END -->
 
-Every station-day in both cities exceeded the WHO annual guideline on a rolling
-basis. There is no clean week in this dataset.
+### Sustained exposure, not just daily peaks
+
+A 24-hour mean hides the fact that the air is never clean. The rolling table
+above is a **7-day mean per station**, graded against the *annual* guidelines — a
+7-day mean is a sustained-exposure statistic, and comparing it to a 24-hour limit
+would pass almost everything. The pipeline computes it in
+`data/reports/rolling.parquet`.
 
 ```sql
 -- src/aqetl/report.py :: _ROLLING_SQL
@@ -194,7 +193,7 @@ print(duckdb.sql('''
 uv sync
 export OPENAQ_API_KEY=...          # free: https://explore.openaq.org/register
 uv run python -m aqetl run --since 2026-08-18
-uv run python -m aqetl report      # rebuild reports + chart, no API calls
+uv run python -m aqetl report      # rebuild reports, chart and README tables
 uv run python -m aqetl probe       # print what the API returns per city
 uv run pytest -q
 ```

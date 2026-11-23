@@ -191,6 +191,9 @@ def _report() -> int:
     for name, path in paths.items():
         _log(name, str(path))
     _log("chart", str(chart.render(ROOT, CHART)))
+    # The results tables live in the README, so they must move with the data.
+    if report.update_readme(ROOT, Path("README.md")):
+        _log("readme", "results block refreshed")
     return 0
 
 
