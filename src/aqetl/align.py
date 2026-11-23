@@ -59,16 +59,21 @@ def join_weather(
     curated: pl.DataFrame, weather: pl.DataFrame
 ) -> pl.DataFrame:
     """Left-join hourly weather onto observations on (city, hour_utc)."""
+    weather_cols = (
+        "temperature_2m",
+        "relative_humidity_2m",
+        "wind_speed_10m",
+        "precipitation",
+    )
     if weather.is_empty():
         return curated.with_columns(
-            pl.lit(None, dtype=pl.Float64).alias("temperature_2m"),
-            pl.lit(None, dtype=pl.Float64).alias("relative_humidity_2m"),
-            pl.lit(None, dtype=pl.Float64).alias("wind_speed_10m"),
-            pl.lit(None, dtype=pl.Float64).alias("precipitation"),
+            *[pl.lit(None, dtype=pl.Float64).alias(name) for name in weather_cols]
         )
-    return curated.join(
-        weather.select("city", "hour_utc", "temperature_2m", "relative_humidity_2m",
-                       "wind_speed_10m", "precipitation"),
+    # The curated contract already carries these columns as nulls, so they must be
+    # dropped first: polars would otherwise suffix the joined copies `_right` and
+    # leave every reading with a null weather value.
+    return curated.drop(*weather_cols, strict=False).join(
+        weather.select("city", "hour_utc", *weather_cols),
         on=["city", "hour_utc"],
         how="left",
     )

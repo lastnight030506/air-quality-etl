@@ -91,3 +91,51 @@ def test_join_weather_on_city_and_hour():
     )
     joined = align.join_weather(curated, weather)
     assert joined["temperature_2m"].to_list() == [27.5, None]
+
+
+def test_join_weather_overwrites_the_contract_columns():
+    """REGRESSION: curated already carries the weather columns as nulls.
+
+    Joining a second copy made polars suffix it `_right` and leave every reading
+    with a null temperature, so the whole weather fetch was silently discarded.
+    """
+    import polars as pl
+
+    from aqetl import schema
+
+    curated = pl.DataFrame(
+        {
+            "city": ["hanoi"],
+            "hour_utc": [datetime(2026, 11, 1, 0, 0, tzinfo=UTC)],
+            "parameter": ["pm25"],
+            "value_clean": [20.0],
+            "temperature_2m": [None],
+            "relative_humidity_2m": [None],
+            "wind_speed_10m": [None],
+            "precipitation": [None],
+        },
+        schema_overrides={
+            "hour_utc": pl.Datetime("us", "UTC"),
+            "temperature_2m": pl.Float64(),
+            "relative_humidity_2m": pl.Float64(),
+            "wind_speed_10m": pl.Float64(),
+            "precipitation": pl.Float64(),
+        },
+    )
+    weather = pl.DataFrame(
+        {
+            "city": ["hanoi"],
+            "hour_utc": [datetime(2026, 11, 1, 0, 0, tzinfo=UTC)],
+            "temperature_2m": [28.4],
+            "relative_humidity_2m": [80.0],
+            "wind_speed_10m": [5.0],
+            "precipitation": [0.0],
+        },
+        schema_overrides={"hour_utc": pl.Datetime("us", "UTC")},
+    )
+
+    joined = align.join_weather(curated, weather)
+    assert joined["temperature_2m"].to_list() == [28.4]
+    assert not any(c.endswith("_right") for c in joined.columns)
+    # Still conforms to the store contract.
+    assert set(joined.columns) <= set(schema.CURATED_SCHEMA)
