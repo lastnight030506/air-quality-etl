@@ -69,7 +69,9 @@ def flag_stuck(df: pl.DataFrame, col: str = "value_ugm3") -> pl.DataFrame:
     ordered = df.sort([*_SENSOR, "hour_utc"])
     runs = (
         ordered
-        .with_columns(pl.col(col).round(2).alias("_v"))
+        # An all-null column arrives as dtype Null, which round() rejects; cast
+        # first so a fully empty parameter cannot crash the run.
+        .with_columns(pl.col(col).cast(pl.Float64).round(2).alias("_v"))
         .with_columns(
             pl.struct([*_SENSOR, "_v"]).rle_id().over(_SENSOR).alias("_run")
         )
@@ -115,8 +117,21 @@ def flag_spike(df: pl.DataFrame, col: str = "value_ugm3") -> pl.DataFrame:
 
 
 def flag_missing(df: pl.DataFrame, col: str = "value_ugm3") -> pl.DataFrame:
-    """Flag null-valued rows produced by gap filling (see gaps.py)."""
-    return df.with_columns(pl.col(col).is_null().alias("qc_missing"))
+    """Flag rows the spine invented, not rows we received but could not convert.
+
+    `gaps.fill_gaps` already set qc_missing from the spine, and that is the
+    authoritative signal: a gap-filled row has no coverage figure because the
+    station never reported it. A received row with an unrecognised unit also has
+    a null value_ugm3, but it still carries coverage — counting it as missing
+    would blame the station's uptime for our conversion gap.
+    """
+    if "coverage_pct" not in df.columns:
+        # Frames that never went through the spine carry no coverage column; the
+        # null test is then the only signal available.
+        return df.with_columns(pl.col(col).is_null().alias("qc_missing"))
+    return df.with_columns(
+        (pl.col(col).is_null() & pl.col("coverage_pct").is_null()).alias("qc_missing")
+    )
 
 
 def add_flag_count(df: pl.DataFrame) -> pl.DataFrame:

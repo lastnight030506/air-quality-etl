@@ -49,3 +49,9 @@ def test_to_ugm3_converts_mixed_units_per_parameter():
     values = out["value_ugm3"].to_list()
     assert values[0] == 12.0
     assert values[1] == pytest.approx(188.16, abs=0.1)
+
+
+def test_gas_unit_on_a_particulate_returns_none_not_a_crash():
+    """REGRESSION: factor('pm25','ppm') raised KeyError and killed the run."""
+    assert units.factor("pm25", "ppm") is None
+    assert units.factor("pm10", "ppb") is None

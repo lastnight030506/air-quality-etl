@@ -80,7 +80,12 @@ WITH hourly AS (
     WINDOW w AS (PARTITION BY city, station_id, parameter ORDER BY hour_utc
                  ROWS BETWEEN 23 PRECEDING AND CURRENT ROW)
 ), full_days AS (
-    SELECT * FROM rolled WHERE span_h = 23 AND n24 >= 18
+    -- A 24 h mean is attributed to the date its window ENDS on, so the window
+    -- must end at the last hour of that date. Without this, a station whose day
+    -- ends early had a mostly-previous-day window labelled as today: 17 of 393
+    -- station-days in the shipped store. Today is then honestly absent until it
+    -- completes, rather than appearing with a partial mean.
+    SELECT * FROM rolled WHERE span_h = 23 AND n24 >= 18 AND EXTRACT(hour FROM hour_utc) = 23
 ), day_last AS (
     SELECT *, row_number() OVER (PARTITION BY city, station_id, parameter, d
                                 ORDER BY hour_utc DESC) AS rn
@@ -125,8 +130,11 @@ WITH hourly AS (
            avg(value_clean) OVER w AS rolling7_ugm3,
            count(value_clean) OVER w AS n7
     FROM hourly
+    -- 167 HOURS, not INTERVAL 6 DAYS: a 7-day hourly window is 168 points, and
+    -- INTERVAL 6 DAYS spans only 145 of them. The trailing-inclusive frame means
+    -- 167 preceding + the current row.
     WINDOW w AS (PARTITION BY city, station_id ORDER BY hour_utc
-                 RANGE BETWEEN INTERVAL 6 DAYS PRECEDING AND CURRENT ROW)
+                 RANGE BETWEEN INTERVAL 167 HOURS PRECEDING AND CURRENT ROW)
 ), last_of_day AS (
     SELECT *,
            row_number() OVER (
@@ -141,8 +149,8 @@ SELECT t.city, t.station_id, CAST(t.ts AS DATE) AS day,
        t.rolling7_ugm3 > lmt.who_annual  AS over_who_annual
 FROM last_of_day t
 JOIN limits lmt ON lmt.parameter = ? AND lmt.d = CAST(t.ts AS DATE)
--- 96 of the 168 hours in the window: a rolling mean built from a third of the
--- window is not a 7-day mean.
+-- 96 of the 168 hours in the window: a rolling mean built from under 4 days of
+-- a 7-day window is not a 7-day mean.
 WHERE t.rn = 1 AND t.n7 >= 96
 ORDER BY t.city, t.station_id, day
 """
@@ -329,10 +337,15 @@ def _results_markdown(root: Path, today: date) -> str:
         "|---|---|---|---|---|---|",
     ]
     for row in ex.sort("city", "parameter").iter_rows(named=True):
+        # A parameter with no 24 h QCVN limit (O3, SO2) has a null ratio. An
+        # absent limit is "not regulated", not "0 days over", so the row is
+        # labelled rather than dropped — and never formatted as a number.
+        limit_qcvn = row["mean_ratio_qcvn"]
+        ratio = "not regulated" if limit_qcvn is None else f"{limit_qcvn:.2f}×"
         lines.append(
             f"| {_city(row['city'])} | {_PARAM_LABEL.get(row['parameter'], row['parameter'])} "
             f"| {row['days_evaluated']} | **{row['days_over_qcvn']}** | "
-            f"**{row['days_over_who']}** | {row['mean_ratio_qcvn']:.2f}× |"
+            f"**{row['days_over_who']}** | {ratio} |"
         )
     if not roll.is_empty():
         lines += [

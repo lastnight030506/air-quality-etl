@@ -113,3 +113,29 @@ def test_stuck_still_fires_on_a_real_run_next_to_nulls():
     stuck = out.filter(pl.col("qc_stuck"))
     assert stuck.height == 6
     assert stuck["value_ugm3"].to_list() == [40.0] * 6
+
+
+def test_unconvertible_unit_is_not_reported_as_a_coverage_gap():
+    """REGRESSION: a received row with an unknown unit became 'missing'.
+
+    That blamed the station's uptime for our conversion failure and inflated
+    missing_pct while deflating anomaly_pct.
+    """
+    df = pl.DataFrame(
+        {
+            "city": ["h"] * 3,
+            "station_id": [1] * 3,
+            "sensor_id": [9] * 3,
+            "parameter": ["pm25"] * 3,
+            "hour_utc": [BASE + timedelta(hours=i) for i in range(3)],
+            "value_raw": [10.0, 10.0, 10.0],
+            "value_ugm3": [None, 10.0, 10.0],
+            "coverage_pct": [100.0, 100.0, 100.0],  # received
+        },
+        schema_overrides={"hour_utc": pl.Datetime("us", "UTC")},
+    )
+    out = qaqc.apply_all(df)
+    assert out["qc_missing"].to_list() == [False, False, False]
+
+    spine_row = df.head(1).with_columns(pl.lit(None, dtype=pl.Float64).alias("coverage_pct"))
+    assert qaqc.apply_all(spine_row)["qc_missing"].to_list() == [True]

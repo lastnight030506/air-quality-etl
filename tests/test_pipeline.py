@@ -140,9 +140,6 @@ def test_full_pipeline_writes_parquet_and_chart(monkeypatch, tmp_path):
     storage.write_curated(clean, root=tmp_path)
     assert len(storage.read_curated(root=tmp_path)) == 96
 
-    daily = storage.fetch  # keep the import honest
-    assert callable(daily)
-
     out = chart.render(root=tmp_path, out=tmp_path / "chart.png", today=START.date())
     assert out.exists() and out.stat().st_size > 10_000
 
@@ -273,3 +270,20 @@ def test_spine_never_counts_unelapsed_hours_as_missing():
     )
     future = filled.filter(pl.col("hour_utc") > now)
     assert future.height == 0
+
+
+def test_fill_gaps_with_every_group_skipped_returns_empty():
+    """REGRESSION: pl.concat([]) raises when every group had no readings."""
+    df = pl.DataFrame(
+        {
+            "city": ["hanoi"],
+            "station_id": [1],
+            "sensor_id": [9],
+            "parameter": ["pm25"],
+            "hour_utc": [START],
+            "value_raw": [None],  # present row, no reading
+        },
+        schema_overrides={"hour_utc": pl.Datetime("us", "UTC")},
+    )
+    out = gaps.fill_gaps(df, START, START + timedelta(hours=24))
+    assert out.is_empty()

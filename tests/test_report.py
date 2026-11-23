@@ -6,7 +6,7 @@ the coverage filter rather than just the arithmetic.
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
 import polars as pl
 import pytest
@@ -117,3 +117,64 @@ def test_readme_without_markers_is_left_alone(tmp_path):
     readme.write_text("# No markers here\n")
     assert report.update_readme(tmp_path, readme, today=TODAY) is False
     assert readme.read_text() == "# No markers here\n"
+
+
+def test_rolling_window_is_seven_days_not_six(tmp_path):
+    """REGRESSION: INTERVAL 6 DAYS spans 145 hours, not the 168 of a 7-day window.
+
+    The shipped store showed max n7 = 145, so the "7-day" mean was a 6-day mean
+    and the 96-hour coverage gate silently meant 66% instead of 57%.
+    """
+    _seed(tmp_path, dict.fromkeys(range(12 * 24), 40.0))
+    frame = report.build_rolling(tmp_path, days=12, today=TODAY)
+    assert frame["n7"].max() == 168
+
+
+def test_daily_window_must_end_on_the_day_it_labels(tmp_path):
+    """REGRESSION: a window ending at 13:00 was published as that date's mean.
+
+    17 of 393 station-days were attributed to the wrong date, because the chosen
+    block was a trailing 24 h spanning mostly the previous day. A day that ends
+    early must lose its count entirely, not be relabelled with stale data.
+    """
+    _seed(tmp_path, dict.fromkeys(range(12 * 24), 80.0))
+    full = report.build_exceedance(tmp_path, days=12, today=TODAY).row(0, named=True)
+    assert full["days_evaluated"] == 12
+
+    # Truncate the final day at 13:00 and re-run.
+    df = pl.read_parquet(tmp_path / "curated" / "city=hanoi" / "part-2026-11.parquet")
+    cutoff = datetime.combine(TODAY, time(13, 0), tzinfo=UTC)
+    kept = df.filter(pl.col("hour_utc") <= cutoff)
+    for path in (tmp_path / "curated").rglob("*.parquet"):
+        path.unlink()
+    storage.write_curated(kept, root=tmp_path)
+
+    truncated = report.build_exceedance(tmp_path, days=12, today=TODAY).row(0, named=True)
+    assert truncated["days_evaluated"] == 11
+
+
+def test_parameter_without_a_24h_limit_does_not_crash_the_readme(tmp_path):
+    """REGRESSION: mean_ratio_qcvn is null for O3/SO2 and formatting it raised.
+
+    That exception ran AFTER write_curated, so one O3 station reporting would
+    fail every scheduled run and discard the data it had already fetched.
+    """
+    rows = []
+    start = datetime.combine(TODAY - timedelta(days=9), datetime.min.time(), tzinfo=UTC)
+    for hour in range(10 * 24):
+        rows.append(
+            {
+                "city": "hanoi", "station_id": 1, "station_name": "S", "sensor_id": 9,
+                "parameter": "o3", "hour_utc": start + timedelta(hours=hour),
+                "value_raw": 50.0, "unit": "µg/m³", "unit_factor": 1.0, "value_ugm3": 50.0,
+                "coverage_pct": 100.0, "qc_negative": False, "qc_impossible": False,
+                "qc_stuck": False, "qc_spike": False, "qc_missing": False, "qc_flags": 0,
+                "value_clean": 50.0,
+            }
+        )
+    storage.write_curated(pl.DataFrame(rows, schema=schema.CURATED_SCHEMA), root=tmp_path)
+
+    readme = tmp_path / "README.md"
+    readme.write_text("<!-- RESULTS:START -->\n<!-- RESULTS:END -->\n")
+    assert report.update_readme(tmp_path, readme, today=TODAY) is True
+    assert "not regulated" in readme.read_text()

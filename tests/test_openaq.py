@@ -217,3 +217,36 @@ def test_401_is_not_retried(monkeypatch):
     with httpx.Client() as client, pytest.raises(RuntimeError, match="OPENAQ_API_KEY"):
         openaq._request(client, f"{openaq.OPENAQ_BASE}/locations", {})
     assert len(calls) == 1
+
+
+def test_transport_error_is_retried(monkeypatch):
+    """REGRESSION: only HTTP statuses retried, so one flaky handshake aborted."""
+    monkeypatch.setenv("OPENAQ_API_KEY", "test-key")
+    monkeypatch.setattr(openaq, "_BACKOFF_S", 0.0)
+    attempts: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise httpx.ConnectTimeout("handshake timed out")
+        return httpx.Response(200, json={"results": []})
+
+    real = httpx.Client
+
+    def patched(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(openaq.httpx, "Client", patched)
+    with httpx.Client() as client:
+        payload = openaq._request(client, f"{openaq.OPENAQ_BASE}/locations", {})
+    assert payload["results"] == []
+    assert len(attempts) == 2
+
+
+def test_429_sleep_is_capped(monkeypatch):
+    """REGRESSION: an epoch-valued reset header would sleep for 20,000 days."""
+    epoch = httpx.Response(429, headers={"x-ratelimit-reset": "1763900000"})
+    assert openaq._reset_seconds(epoch) == openaq._MAX_SLEEP_S
+    fine = httpx.Response(429, headers={"x-ratelimit-reset": "30"})
+    assert openaq._reset_seconds(fine) == 30

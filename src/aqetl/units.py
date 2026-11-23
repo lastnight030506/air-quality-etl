@@ -53,6 +53,11 @@ def factor(parameter: str, unit: str) -> float | None:
     lowered = unit.lower().replace("μ", "µ")
     if lowered in {"µg/m³", "ug/m3", "µg/m3", "ug/m³"}:
         return 1.0
+    # A gas unit on a particulate parameter is not convertible by molar mass.
+    # Return None (a recoverable null) rather than letting _MOLAR_MASS raise and
+    # take the whole run down with it.
+    if parameter not in _MOLAR_MASS:
+        return None
     if lowered in {"ppb", "parts per billion"}:
         return ugm3_per_ppm(parameter) / 1000.0
     if lowered in {"ppm", "parts per million"}:

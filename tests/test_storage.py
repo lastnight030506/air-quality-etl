@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import duckdb
 import polars as pl
 
 from aqetl import chart, storage
@@ -95,10 +94,37 @@ def test_write_is_idempotent(tmp_path):
 
 
 def test_duckdb_view_reads_partitions(tmp_path):
+    """duck_conn must expose a queryable view over the parquet files."""
+    from datetime import datetime
 
+    from aqetl import schema, storage
+
+    row = {
+        "city": "hanoi", "station_id": 1, "station_name": "Test", "sensor_id": 9,
+        "parameter": "pm25", "hour_utc": datetime(2026, 11, 1, 0, 0),
+        "value_raw": 12.0, "unit": "µg/m³", "unit_factor": 1.0, "value_ugm3": 12.0,
+        "coverage_pct": 100.0, "qc_negative": False, "qc_impossible": False,
+        "qc_stuck": False, "qc_spike": False, "qc_missing": False, "qc_flags": 0,
+        "value_clean": 12.0,
+    }
+    storage.write_curated(pl.DataFrame([row], schema=schema.CURATED_SCHEMA), root=tmp_path)
+
+    con = storage.duck_conn(tmp_path)
+    try:
+        total = con.execute("SELECT count(*) FROM curated").fetchone()[0]
+        city = con.execute("SELECT city FROM curated").fetchone()[0]
+    finally:
+        con.close()
+    assert total == 1
+    assert city == "hanoi"
+
+
+def test_empty_store_view_still_answers(tmp_path):
+    """A fresh checkout has no parquet files; report SQL must still run."""
     from aqetl import storage
 
-    assert isinstance(storage.read_curated(root=tmp_path), pl.DataFrame)
-    con = duckdb.connect()
-    assert con is not None
-    con.close()
+    con = storage.duck_conn(tmp_path)
+    try:
+        assert con.execute("SELECT count(*) FROM curated").fetchone()[0] == 0
+    finally:
+        con.close()

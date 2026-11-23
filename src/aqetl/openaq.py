@@ -39,6 +39,7 @@ _MAX_LOCATION_PAGES = 5
 _MAX_RETRIES = 4
 _RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 _BACKOFF_S = 2.0
+_MAX_SLEEP_S = 60
 _PAGE_SLEEP_S = 0.05
 _DEFAULT_RESET_S = 60
 
@@ -80,28 +81,44 @@ def _parse_utc(stamp: str | None) -> datetime | None:
 
 def _reset_seconds(response: httpx.Response) -> int:
     try:
-        return int(response.headers.get("x-ratelimit-reset", _DEFAULT_RESET_S))
+        seconds = int(response.headers.get("x-ratelimit-reset", _DEFAULT_RESET_S))
     except ValueError:  # header may be an HTTP date rather than seconds
         return _DEFAULT_RESET_S
+    # A header carrying an epoch (or a multi-hour window) would otherwise sleep
+    # for days and die on the job timeout. Waiting is capped at a minute.
+    return max(1, min(seconds, _MAX_SLEEP_S))
 
 
 def _request(client: httpx.Client, url: str, params: dict) -> dict:
     headers = {"X-API-Key": _api_key()}
-    response = client.get(url, params=params, headers=headers)
+    last: Exception | None = None
+    response: httpx.Response | None = None
     for attempt in range(_MAX_RETRIES):
+        try:
+            response = client.get(url, params=params, headers=headers)
+        except httpx.TransportError as exc:
+            # The same runners that fail the met host's TLS handshake run this
+            # call; a single flaky handshake must not abort the whole extract.
+            last = exc
+            if attempt == _MAX_RETRIES - 1:
+                raise
+            time.sleep(_BACKOFF_S * (attempt + 1))
+            continue
         if response.status_code not in _RETRY_STATUSES:
             break
         if attempt == _MAX_RETRIES - 1:
             break
         # 429 tells us when to come back; a 5xx is transient by nature and a
-        # fixed backoff is all we can do. One 500 killed a whole run before.
+        # fixed backoff is all we can do.
         delay = (
             _reset_seconds(response)
             if response.status_code == 429
             else _BACKOFF_S * (attempt + 1)
         )
         time.sleep(delay)
-        response = client.get(url, params=params, headers=headers)
+    if response is None:
+        assert last is not None
+        raise last
     if response.status_code == 401:
         raise RuntimeError(_MISSING_KEY)
     response.raise_for_status()

@@ -67,9 +67,10 @@ def fill_gaps(df: pl.DataFrame, start: datetime, end: datetime) -> pl.DataFrame:
             continue
         spine = align.hourly_spine(spine_start, spine_end, city, station_id, parameter)
         # The curated key has no sensor_id, so two sensors on one parameter would
-        # collide: prefer a real reading over a null, then the lowest sensor id.
+        # collide: prefer a row that actually converted to ug/m3 (a raw value with
+        # an unknown unit is not usable), then the lowest sensor id.
         observed = (
-            group.sort(pl.col("value_raw").is_null(), "sensor_id")
+            group.sort(pl.col("value_ugm3").is_null(), "sensor_id")
             .unique(subset=["hour_utc"], keep="first")
             .drop(*_GROUP)
             .with_columns(pl.lit(True).alias("_present"))
@@ -94,6 +95,10 @@ def fill_gaps(df: pl.DataFrame, start: datetime, end: datetime) -> pl.DataFrame:
                 .alias("qc_flags"),
             ).drop("_present")
         )
+    if not frames:
+        # Every group was skipped (no received readings), which the df.is_empty()
+        # guard above does not cover.
+        return schema.empty_curated()
     out = pl.concat(frames, how="vertical")
     return out.select(
         [pl.col(name).cast(dtype) for name, dtype in CURATED_SCHEMA.items()]

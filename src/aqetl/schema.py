@@ -30,6 +30,13 @@ CURATED_SCHEMA: dict[str, pl.DataType] = {
     "qc_missing": pl.Boolean(),
     "qc_flags": pl.Int32(),
     "value_clean": pl.Float64(),
+    # Denormalised alongside each reading so a query over curated alone can
+    # stratify pollution by weather (inversions, rain washout, wind dispersal).
+    # Without these the weather fetch was joined and then discarded by conform().
+    "temperature_2m": pl.Float64(),
+    "relative_humidity_2m": pl.Float64(),
+    "wind_speed_10m": pl.Float64(),
+    "precipitation": pl.Float64(),
 }
 
 WEATHER_SCHEMA: dict[str, pl.DataType] = {
