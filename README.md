@@ -49,13 +49,28 @@ SELECT city, station_id, hour_utc,
 FROM curated
 WHERE parameter = 'pm25'
 WINDOW w AS (PARTITION BY city, station_id ORDER BY hour_utc
-             RANGE BETWEEN INTERVAL 6 DAYS PRECEDING AND CURRENT ROW)
+             RANGE BETWEEN INTERVAL 167 HOURS PRECEDING AND CURRENT ROW)
 ```
 
 `RANGE`, not `ROWS 167 PRECEDING`, because stations have gaps: the window is
-elapsed time, not the last 168 observations. Windows built from fewer than 96 of
-the 168 possible hours are dropped — a mean over a third of the window is not a
-7-day mean.
+elapsed time, not the last 168 observations. And `167 HOURS`, not
+`INTERVAL 6 DAYS` — that spans only 145 hourly points, which is a 6-day mean
+wearing a 7-day label. Windows built from fewer than 96 of the 168 possible hours
+are dropped: a mean over half the window is not a 7-day mean.
+
+### Weather explains a lot of the variance
+
+Because the met series is denormalised onto each reading, calm vs breezy hours can
+be compared directly (query in [Output](#output)):
+
+| City | Calm (<5 km/h) | Breezy (≥5 km/h) |
+|---|---|---|
+| Hanoi | **42.7 µg/m³** | 33.0 µg/m³ |
+| HCMC | **36.1 µg/m³** | 28.0 µg/m³ |
+
+PM2.5 is ~28% higher in calm hours in both cities. That is the physical mechanism
+— still air traps local emissions instead of dispersing them — and it is the kind
+of check that says whether the weather join is actually wired up.
 
 ## Coverage, stated honestly
 
@@ -164,13 +179,31 @@ WHO's 15.
 
 ```
 data/
-  curated/city=hanoi/part-2026-11.parquet     # one row per station/parameter/hour
-  weather/city=hanoi/part-2026-11.parquet
+  curated/city=hanoi/part-2026-11.parquet     # one row per station/parameter/hour,
+                                              #   incl. temp/humidity/wind/rain
+  weather/city=hanoi/part-2026-11.parquet     # the met series on its own
   reports/daily.parquet                       # 30-day daily means
   reports/station_qc.parquet                  # quality + coverage per station
   reports/exceedance.parquet                  # days over QCVN / WHO
   reports/rolling.parquet                     # 7-day rolling mean per station
 charts/aq-30d.png
+```
+
+Weather is denormalised onto every reading, so pollution can be stratified by
+conditions in one query — no join needed:
+
+```bash
+uv run python -c "
+import duckdb
+print(duckdb.sql('''
+  select city,
+         case when wind_speed_10m < 5 then 'calm' else 'breezy' end as wind,
+         round(avg(value_clean), 1) as pm25, count(*) as hours
+  from read_parquet('data/curated/*/*.parquet')
+  where parameter = 'pm25'
+  group by all order by city, wind
+'''))
+"
 ```
 
 Query it directly:
