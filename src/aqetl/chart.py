@@ -22,7 +22,7 @@ from .config import ATTRIBUTION, CITIES  # noqa: E402
 
 # Okabe-Ito: distinguishable to colour-blind readers and high contrast on both
 # GitHub themes. Explicit hex because the default cycle's yellow vanishes on light.
-CITY_COLOURS = {"hanoi": "#0072B2", "danang": "#D55E00", "hcmc": "#009E73"}
+CITY_COLOURS = {"hanoi": "#0072B2", "hcmc": "#009E73"}
 BENCH_COLOUR = "#B2182B"
 WHO_COLOUR = "#5A5A5A"
 BAR_COLOUR = "#52527A"
@@ -50,8 +50,8 @@ def _top(ax: plt.Axes, daily: pl.DataFrame, today: date) -> None:
             linewidth=1.8,
             label=DISPLAY[key],
         )
-    # Cities with no reporting station must be stated, not silently missing:
-    # Da Nang has no OpenAQ location within 25 km at all.
+    # A configured city with no reporting station must be stated, not silently
+    # missing: the reader cannot tell an empty series from an absent one.
     absent = [DISPLAY[key] for key in (c.key for c in CITIES) if key not in plotted]
     if absent:
         ax.annotate(

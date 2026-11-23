@@ -198,13 +198,13 @@ uv run python -m aqetl probe       # print what the API returns per city
 uv run pytest -q
 ```
 
-A 90-day backfill for three cities is a few hundred requests, comfortably inside
+A 90-day backfill for both cities is a few hundred requests, comfortably inside
 OpenAQ's free tier of 2000 requests/hour.
 
 ## Testing
 
 ```bash
-uv run pytest -q       # 61 tests
+uv run pytest -q       # 71 tests
 ```
 
 The tests pin the boundaries that are easy to get quietly wrong: stuck detection

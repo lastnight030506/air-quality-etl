@@ -113,8 +113,8 @@ def _run(args: argparse.Namespace) -> int:
 def _discover(args: argparse.Namespace) -> int:
     """Rank Vietnamese localities by how recently a station there reported.
 
-    Written because the brief named three cities and only two turned out to have
-    live OpenAQ stations; the coverage has to be measured, not assumed.
+    Coverage has to be measured, not assumed: the initial target list included a
+    city with no live OpenAQ station at all, and only this enumeration showed it.
     """
     from collections import Counter, defaultdict
 

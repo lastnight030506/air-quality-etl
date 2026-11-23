@@ -1,7 +1,7 @@
 [project]
 name = "air-quality-etl"
 version = "0.1.0"
-description = "Automated air quality & weather ETL for Hanoi, Da Nang and Ho Chi Minh City"
+description = "Automated air quality & weather ETL for Hanoi and Ho Chi Minh City"
 requires-python = ">=3.12"
 dependencies = [
     "duckdb>=1.1",
