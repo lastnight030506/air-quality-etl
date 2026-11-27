@@ -15,13 +15,13 @@ by **DuckDB**, and refreshes the chart below. No local machine involved.
 ## What it found
 
 <!-- RESULTS:START -->
-Rolling 90-day window ending **2026-11-26**, from the stations
+Rolling 90-day window ending **2026-11-27**, from the stations
 reporting in that window.
 
 | City | Pollutant | Days evaluated | Over QCVN 24 h | Over WHO 24 h | 90-day mean ratio vs QCVN |
 |---|---|---|---|---|---|
-| Hanoi | PM10 | 89 | **9** | **67** | 0.58× |
-| Hanoi | PM2.5 | 89 | **36** | **86** | 0.81× |
+| Hanoi | PM10 | 89 | **9** | **67** | 0.59× |
+| Hanoi | PM2.5 | 89 | **37** | **86** | 0.82× |
 | Ho Chi Minh City | PM2.5 | 89 | **9** | **87** | 0.70× |
 
 7-day rolling mean per station, graded against the **annual** guidelines
@@ -29,8 +29,8 @@ reporting in that window.
 
 | City | Station-days | Above QCVN annual (25 µg/m³) | Above WHO annual (5 µg/m³) | Worst 7-day mean |
 |---|---|---|---|---|
-| Hanoi | 267 | **86.1%** | **100.0%** | 81.4 µg/m³ |
-| Ho Chi Minh City | 100 | **92.0%** | **100.0%** | 50.7 µg/m³ |
+| Hanoi | 269 | **85.9%** | **100.0%** | 81.4 µg/m³ |
+| Ho Chi Minh City | 101 | **93.1%** | **100.0%** | 50.7 µg/m³ |
 <!-- RESULTS:END -->
 
 ### Sustained exposure, not just daily peaks
